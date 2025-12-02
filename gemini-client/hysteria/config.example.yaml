@@ -1,0 +1,8 @@
+# Sample Hysteria2 client config (fill with your values)
+server: your.server.com:8443
+auth: your_password
+tls:
+  sni: your.server.com
+
+http:
+  listen: 0.0.0.0:8080

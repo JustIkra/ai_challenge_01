@@ -1,0 +1,237 @@
+# Gemini Client Worker
+
+Universal RabbitMQ worker for Gemini API with multi-key rotation and rate limit handling.
+
+## Features
+
+- **Multi-key rotation**: Round-robin rotation across multiple Gemini API keys
+- **Rate limit handling**: Automatic cooldown and retry with escalating delays
+- **Async architecture**: Built with asyncio and aio-pika for high performance
+- **Message queue**: RabbitMQ-based request/response pattern
+- **HTTP proxy support**: Optional proxy configuration for API requests
+- **Graceful shutdown**: Handles SIGTERM/SIGINT signals properly
+- **Horizontal scaling**: Run multiple workers concurrently
+
+## Architecture
+
+```
+RabbitMQ Queue (gemini.requests)
+          ↓
+    Gemini Worker
+          ↓
+    Key Manager (round-robin)
+          ↓
+    Gemini API Client
+          ↓
+   [Optional Proxy]
+          ↓
+    Gemini API
+          ↓
+RabbitMQ Queue (gemini.responses)
+```
+
+## Installation
+
+### Using Docker (Recommended)
+
+```bash
+# Build image
+docker build -t gemini-client .
+
+# Run worker
+docker run --env-file .env gemini-client
+```
+
+### Manual Installation
+
+```bash
+# Install dependencies
+pip install -e .
+
+# For development
+pip install -e ".[dev]"
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+```bash
+# RabbitMQ
+RABBITMQ_URL=amqp://user:password@localhost:5672/
+
+# Gemini API Keys (comma-separated)
+GEMINI_API_KEYS=key1,key2,key3
+
+# Rate Limiting
+KEYS_MAX_PER_MINUTE=10
+KEYS_COOLDOWN_SECONDS=60
+
+# Queue Retry (escalating delays in seconds)
+QUEUE_RETRY_DELAYS=60,600,3600,86400
+QUEUE_MAX_RETRIES=4
+
+# HTTP Proxy (optional)
+HTTP_PROXY=http://localhost:8080
+```
+
+## Usage
+
+### Running the Worker
+
+```bash
+# Using Python
+python -m src.main
+
+# Using Docker
+docker run --env-file .env gemini-client
+```
+
+### Horizontal Scaling
+
+Run multiple workers to increase throughput:
+
+```bash
+# Docker Compose example
+services:
+  gemini-worker:
+    image: gemini-client
+    env_file: .env
+    deploy:
+      replicas: 3
+```
+
+## Message Schemas
+
+### Request Message (gemini.requests)
+
+```json
+{
+  "request_id": "uuid",
+  "prompt": "Tell me about Python",
+  "model": "gemini-pro",
+  "parameters": {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "top_k": 40,
+    "max_output_tokens": 2048
+  },
+  "callback_queue": "gemini.responses",
+  "timestamp": "2025-01-01T00:00:00Z",
+  "retry_count": 0
+}
+```
+
+### Response Message (gemini.responses)
+
+```json
+{
+  "request_id": "uuid",
+  "status": "success",
+  "content": "Python is...",
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 150,
+    "total_tokens": 160
+  },
+  "processing_time_ms": 1234.56,
+  "model_used": "gemini-pro",
+  "timestamp": "2025-01-01T00:00:00Z"
+}
+```
+
+Error response:
+
+```json
+{
+  "request_id": "uuid",
+  "status": "error",
+  "error": "Rate limit exceeded after all retries",
+  "processing_time_ms": 5000.0,
+  "timestamp": "2025-01-01T00:00:00Z"
+}
+```
+
+## Rate Limiting
+
+### Key Manager
+
+- Round-robin rotation across all API keys
+- Tracks usage per key (requests per minute)
+- Automatic cooldown on 429 errors
+- Returns `None` when all keys are unavailable
+
+### Retry Strategy
+
+When no keys are available:
+
+1. **Retry 0**: Requeue after 1 minute (60s)
+2. **Retry 1**: Requeue after 10 minutes (600s)
+3. **Retry 2**: Requeue after 1 hour (3600s)
+4. **Retry 3**: Requeue after 24 hours (86400s)
+5. **Retry 4**: Send error response
+
+## Development
+
+### Running Tests
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# With coverage
+pytest --cov=src --cov-report=html
+```
+
+### Code Quality
+
+```bash
+# Format code
+black src tests
+
+# Lint
+ruff check src tests
+
+# Type check
+mypy src
+```
+
+## Logging
+
+Structured logging with request tracking:
+
+```
+2025-01-01 00:00:00 - src.main - INFO - Gemini Worker setup complete
+2025-01-01 00:00:01 - src.worker.consumer - INFO - [uuid] Received request (retry_count=0)
+2025-01-01 00:00:02 - src.client.gemini - INFO - [uuid] Content generated (tokens: 160, time: 1234.56ms)
+2025-01-01 00:00:03 - src.worker.publisher - INFO - Published response for request uuid
+```
+
+## Troubleshooting
+
+### All keys rate limited
+
+Check logs for key status:
+
+```
+- src.client.key_manager - WARNING - No available API keys at the moment
+- src.client.key_manager - INFO - API Keys Status:
+  Key 0 (xxxxxxxx...): usage=10/10, cooldown=45.2s, total=1234, rate_limits=5
+```
+
+Solution: Wait for cooldown to expire or add more API keys
+
+### Messages stuck in queue
+
+Check worker status and RabbitMQ connection. Ensure worker is running and can connect to RabbitMQ.
+
+### Proxy connection issues
+
+Verify `HTTP_PROXY` configuration and proxy server availability.
+
+## License
+
+MIT

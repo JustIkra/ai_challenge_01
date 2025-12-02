@@ -1,0 +1,28 @@
+# Gemini Client Worker
+# Connects to day1-app RabbitMQ via shared network
+
+services:
+  hysteria2:
+    image: tobyxdd/hysteria
+    command: ["client", "-c", "/etc/hysteria/config.yaml"]
+    volumes:
+      - ./hysteria/config.yaml:/etc/hysteria/config.yaml:ro
+    restart: unless-stopped
+
+  gemini-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - HTTP_PROXY=http://hysteria2:8080
+      - HTTPS_PROXY=http://hysteria2:8080
+    depends_on:
+      - hysteria2
+    restart: unless-stopped
+
+networks:
+  default:
+    name: day1_network
+    external: true
