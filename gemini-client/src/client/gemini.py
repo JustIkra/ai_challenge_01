@@ -10,7 +10,7 @@ from google.genai.types import GenerateContentConfig
 
 from ..schemas.request import GenerationParameters
 from ..schemas.response import TokenUsage
-from ..utils.retry import RateLimitError, with_rate_limit_retry
+from ..utils.retry import LocationError, RateLimitError, with_rate_limit_retry
 
 logger = logging.getLogger(__name__)
 
@@ -107,16 +107,28 @@ class GeminiAsyncClient:
             )
 
             # Extract text from response
-            generated_text = getattr(response, "text", None)
+            generated_text = self._extract_text_from_response(response)
+            finish_reason = self._get_finish_reason(response)
+            usage_metadata = getattr(response, "usage_metadata", None)
+
             if not generated_text:
-                detail_msg = self._format_empty_response_details(response)
+                details = []
+                if finish_reason:
+                    details.append(f"finish_reason={finish_reason}")
+                detail_msg = f" ({'; '.join(details)})" if details else ""
                 logger.error(
                     f"[{request_id}] Empty response from Gemini API{detail_msg}"
                 )
                 raise ValueError(f"Empty response from Gemini API{detail_msg}")
 
-            # Extract token usage
-            usage_metadata = getattr(response, "usage_metadata", None)
+            # Log warning if response was truncated due to max tokens
+            if finish_reason and "MAX_TOKENS" in str(finish_reason):
+                logger.warning(
+                    f"[{request_id}] Response truncated due to max_output_tokens limit "
+                    f"(limit: {parameters.max_output_tokens})"
+                )
+
+            # Extract token usage (already captured from streaming)
             if usage_metadata:
                 token_usage = TokenUsage(
                     prompt_tokens=getattr(usage_metadata, "prompt_token_count", 0),
@@ -144,14 +156,14 @@ class GeminiAsyncClient:
             elapsed_time = (time.time() - start_time) * 1000
 
             if "user location is not supported for the api use" in error_msg:
-                logger.error(
+                logger.warning(
                     f"[{request_id}] Gemini API blocked by location. "
-                    f"Configure HTTP(S)_PROXY to a supported region "
+                    f"Proxy may have failed, will retry... "
                     f"(proxy: {self.proxy_url or 'none'})"
                 )
-                raise ValueError(
+                raise LocationError(
                     "Gemini API rejected the request because the location is not supported. "
-                    "Configure HTTP(S)_PROXY to route requests through a supported region."
+                    "Proxy connection may be unstable."
                 ) from e
 
             # Check for rate limit errors
@@ -179,6 +191,47 @@ class GeminiAsyncClient:
             os.environ.pop("https_proxy", None)
 
         logger.info("GeminiAsyncClient closed")
+
+    def _extract_text_from_response(self, response: Any) -> str | None:
+        """Extract text from Gemini response, handling various response formats.
+
+        The SDK's response.text property may return None when finish_reason is
+        MAX_TOKENS, but the content might still be in candidates[0].content.parts.
+        """
+        # First try the simple text property
+        text = getattr(response, "text", None)
+        if text:
+            return text
+
+        # Fallback: extract from candidates directly
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return None
+
+        first_candidate = candidates[0]
+        content = getattr(first_candidate, "content", None)
+        if not content:
+            return None
+
+        parts = getattr(content, "parts", None) or []
+        if not parts:
+            return None
+
+        # Concatenate text from all parts
+        text_parts = []
+        for part in parts:
+            part_text = getattr(part, "text", None)
+            if part_text:
+                text_parts.append(part_text)
+
+        return "".join(text_parts) if text_parts else None
+
+    def _get_finish_reason(self, response: Any) -> Any:
+        """Extract finish_reason from response candidates."""
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            return getattr(candidates[0], "finish_reason", None)
+        return None
 
     def _format_empty_response_details(self, response: Any) -> str:
         """Build human-readable details when API returns no text."""

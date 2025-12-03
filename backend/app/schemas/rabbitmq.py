@@ -13,7 +13,7 @@ class GenerationParameters(BaseModel):
     """Parameters for text generation."""
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_output_tokens: int = Field(default=1024, ge=1, le=8192)
+    max_output_tokens: int = Field(default=8192, ge=1, le=32768)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
     top_k: int = Field(default=40, ge=1, le=100)
 
@@ -38,7 +38,7 @@ class GeminiRequestMessage(BaseModel):
                 "model": "gemini-2.5-flash",
                 "parameters": {
                     "temperature": 0.7,
-                    "max_output_tokens": 1024,
+                    "max_output_tokens": 8192,
                     "top_p": 0.95,
                     "top_k": 40
                 },

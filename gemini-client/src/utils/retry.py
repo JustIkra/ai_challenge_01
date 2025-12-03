@@ -13,6 +13,12 @@ class RateLimitError(Exception):
     pass
 
 
+class LocationError(Exception):
+    """Exception raised when API rejects due to unsupported location."""
+
+    pass
+
+
 class APIError(Exception):
     """General API error."""
 
@@ -46,8 +52,9 @@ def with_rate_limit_retry(
                 try:
                     return await func(*args, **kwargs)
 
-                except RateLimitError as e:
+                except (RateLimitError, LocationError) as e:
                     last_exception = e
+                    error_type = "Rate limit" if isinstance(e, RateLimitError) else "Location error"
 
                     if attempt < max_retries:
                         # Calculate exponential backoff delay
@@ -57,14 +64,14 @@ def with_rate_limit_retry(
                         )
 
                         logger.warning(
-                            f"Rate limit hit in {func.__name__} "
+                            f"{error_type} in {func.__name__} "
                             f"(attempt {attempt + 1}/{max_retries + 1}). "
                             f"Retrying in {delay:.1f}s..."
                         )
                         await asyncio.sleep(delay)
                     else:
                         logger.error(
-                            f"Rate limit retry exhausted for {func.__name__} "
+                            f"{error_type} retry exhausted for {func.__name__} "
                             f"after {max_retries} attempts"
                         )
                         raise
