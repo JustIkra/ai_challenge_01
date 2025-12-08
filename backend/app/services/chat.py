@@ -39,7 +39,8 @@ class ChatService:
         chat = Chat(
             user_id=user_id,
             title=chat_data.title,
-            system_prompt=chat_data.system_prompt
+            system_prompt=chat_data.system_prompt,
+            temperature=chat_data.temperature
         )
         db.add(chat)
         await db.commit()
@@ -247,6 +248,6 @@ class ChatService:
             request_id=request_id,
             prompt=prompt,
             model=settings.GEMINI_MODEL_TEXT,
-            parameters=GenerationParameters(),
+            parameters=GenerationParameters(temperature=chat.temperature or 0.7),
             system_instruction=chat.system_prompt
         )

@@ -23,7 +23,7 @@
           </div>
 
           <!-- System Prompt -->
-          <div class="mb-6">
+          <div class="mb-4">
             <label class="block text-sm font-medium text-gray-300 mb-2">
               System Prompt
             </label>
@@ -35,6 +35,28 @@
             ></textarea>
             <p class="mt-1 text-xs text-gray-400">
               System prompt defines the AI assistant's behavior and context.
+            </p>
+          </div>
+
+          <!-- Temperature -->
+          <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-300 mb-2">
+              Temperature: {{ formData.temperature }}
+            </label>
+            <input
+              v-model.number="formData.temperature"
+              type="range"
+              min="0.1"
+              max="1.5"
+              step="0.1"
+              class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
+            <div class="flex justify-between text-xs text-gray-500 mt-1">
+              <span>0.1</span>
+              <span>1.5</span>
+            </div>
+            <p class="mt-1 text-xs text-gray-400">
+              Lower values produce more stable and deterministic responses. Higher values increase creativity and variability.
             </p>
           </div>
 
@@ -78,7 +100,8 @@ const emit = defineEmits<{
 
 const formData = ref<ChatUpdate>({
   title: '',
-  system_prompt: ''
+  system_prompt: '',
+  temperature: 0.7
 })
 
 const isSaving = ref(false)
@@ -87,7 +110,8 @@ watch(() => props.chat, (newChat) => {
   if (newChat) {
     formData.value = {
       title: newChat.title || '',
-      system_prompt: newChat.system_prompt || ''
+      system_prompt: newChat.system_prompt || '',
+      temperature: newChat.temperature ?? 0.7
     }
   }
 }, { immediate: true })

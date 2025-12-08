@@ -3,6 +3,7 @@ export interface Chat {
   user_id: string
   title: string | null
   system_prompt: string | null
+  temperature: number | null
   created_at: string
 }
 
@@ -31,6 +32,7 @@ export interface ChatCreate {
 export interface ChatUpdate {
   title?: string | null
   system_prompt?: string | null
+  temperature?: number | null
 }
 
 export interface MessageSendResponse {

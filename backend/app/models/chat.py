@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Text, func
+from sqlalchemy import Float, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -25,6 +25,7 @@ class Chat(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.7)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     # Relationships
