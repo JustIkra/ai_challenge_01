@@ -49,10 +49,47 @@
       </div>
 
       <div v-else>
+        <!-- Compressed History Summary -->
+        <div v-if="compressedMessages.length > 0" class="mb-4">
+          <div
+            class="bg-gray-700/50 rounded-lg p-3 cursor-pointer hover:bg-gray-700 transition-colors"
+            @click="showCompressedMessages = !showCompressedMessages"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <svg
+                  class="w-4 h-4 text-gray-400 transition-transform"
+                  :class="{ 'rotate-90': showCompressedMessages }"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+                <span class="text-sm text-gray-400">
+                  {{ compressedMessages.length }} compressed messages
+                </span>
+              </div>
+              <span class="text-xs text-gray-500">Click to expand</span>
+            </div>
+          </div>
+
+          <!-- Expanded compressed messages -->
+          <div v-if="showCompressedMessages" class="mt-2 space-y-2 pl-4 border-l-2 border-gray-600">
+            <div
+              v-for="msg in compressedMessages"
+              :key="msg.id"
+              class="opacity-60"
+            >
+              <MessageBubble :message="msg" />
+            </div>
+          </div>
+        </div>
+
         <MessageBubble
-          v-for="message in chatStore.messages.filter(m => m?.id)"
-          :key="message.id"
-          :message="message"
+          v-for="msg in uncompressedMessages"
+          :key="msg.id"
+          :message="msg"
         />
 
         <!-- Loading indicator for pending response -->
@@ -87,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import MessageBubble from './MessageBubble.vue'
 import MessageInput from './MessageInput.vue'
@@ -98,6 +135,16 @@ import type { Chat } from '@/types/chat'
 const chatStore = useChatStore()
 const messagesContainer = ref<HTMLElement | null>(null)
 const showSettings = ref(false)
+const showCompressedMessages = ref(false)
+
+// Computed properties for message filtering
+const compressedMessages = computed(() =>
+  chatStore.messages.filter(m => m?.id && m.is_compressed === true)
+)
+
+const uncompressedMessages = computed(() =>
+  chatStore.messages.filter(m => m?.id && m.is_compressed !== true)
+)
 
 async function handleSendMessage(content: string) {
   try {

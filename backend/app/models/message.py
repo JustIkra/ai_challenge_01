@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Text, func
+from sqlalchemy import Boolean, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,7 @@ class Message(Base):
     request_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, processing, completed, error
     token_usage: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    is_compressed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     # Relationships

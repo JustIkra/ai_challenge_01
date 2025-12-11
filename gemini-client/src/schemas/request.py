@@ -22,7 +22,7 @@ class GeminiRequestMessage(BaseModel):
 
     request_id: UUID
     prompt: str = Field(..., min_length=1)
-    model: str = Field(default="gemini-2.5-flash")
+    model: str = Field(default="google/gemini-2.5-flash")
     parameters: GenerationParameters = Field(default_factory=GenerationParameters)
     callback_queue: str = Field(default="gemini.responses")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -37,7 +37,7 @@ class GeminiRequestMessage(BaseModel):
             "example": {
                 "request_id": "123e4567-e89b-12d3-a456-426614174000",
                 "prompt": "Tell me about Python",
-                "model": "gemini-2.5-flash",
+                "model": "google/gemini-2.5-flash",
                 "parameters": {
                     "temperature": 0.7,
                     "top_p": 0.95,

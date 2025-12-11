@@ -5,16 +5,19 @@ Background consumer for processing Gemini responses from RabbitMQ.
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 import aio_pika
 from aio_pika import Connection, Channel, IncomingMessage
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.session import async_session_maker
-from app.schemas.rabbitmq import GeminiResponseMessage
+from app.schemas.rabbitmq import GeminiResponseMessage, GeminiRequestMessage
 from app.services.chat import ChatService
+from app.services.compression import CompressionService
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +168,11 @@ class ResponseConsumer:
         try:
             # Create new database session
             async with async_session_maker() as db:
+                # Check if this is a compression response
+                if response.metadata and response.metadata.get('type') == 'compression':
+                    await self._handle_compression_response(db, response)
+                    return
+
                 # Find message by request_id
                 message = await ChatService.get_message_by_request_id(db, response.request_id)
 
@@ -177,21 +185,136 @@ class ResponseConsumer:
                     message.content = response.content or ""
                     message.status = "completed"
                     message.token_usage = response.usage.model_dump() if response.usage else None
-                    logger.info(
-                        f"Message completed: request_id={response.request_id}, "
-                        f"tokens={response.usage.prompt_tokens + response.usage.completion_tokens if response.usage else 0}"
-                    )
+                    if response.usage:
+                        logger.info(
+                            f"Message completed | "
+                            f"request_id={response.request_id} | "
+                            f"model={response.model_used} | "
+                            f"prompt_tokens={response.usage.prompt_tokens} | "
+                            f"completion_tokens={response.usage.completion_tokens} | "
+                            f"total_tokens={response.usage.total_tokens} | "
+                            f"time_ms={response.processing_time_ms:.2f}"
+                        )
+                    else:
+                        logger.info(
+                            f"Message completed | "
+                            f"request_id={response.request_id} | "
+                            f"model={response.model_used} | "
+                            f"tokens=unavailable"
+                        )
+
+                    # Commit changes
+                    await db.commit()
+
+                    # Check if compression should be triggered
+                    await self._maybe_trigger_compression(db, message.chat_id)
+
                 elif response.status == "error":
                     message.status = "error"
                     message.content = f"Error: {response.error}"
                     logger.error(f"Message failed: request_id={response.request_id}, error={response.error}")
 
-                # Commit changes
-                await db.commit()
+                    # Commit changes
+                    await db.commit()
 
         except Exception as e:
             logger.error(f"Error processing response for request_id={response.request_id}: {e}")
             raise
+
+    async def _maybe_trigger_compression(
+        self,
+        db: AsyncSession,
+        chat_id: uuid.UUID
+    ) -> None:
+        """
+        Check if history compression should be triggered and start it if needed.
+
+        This sends a compression request to the Gemini queue. The response will
+        be handled by a separate compression response handler.
+        """
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.models.chat import Chat
+
+        # Get chat with compression settings
+        result = await db.execute(
+            select(Chat)
+            .where(Chat.id == chat_id)
+            .options(selectinload(Chat.messages))
+        )
+        chat = result.scalar_one_or_none()
+
+        if not chat:
+            return
+
+        # Check if compression should happen
+        should_compress = await CompressionService.should_compress(db, chat)
+
+        if not should_compress:
+            return
+
+        logger.info(f"Triggering history compression for chat_id={chat_id}")
+
+        # Build compression request
+        compression_request_id = uuid.uuid4()
+        compression_request = await CompressionService.build_compression_request(
+            db, chat, compression_request_id
+        )
+
+        if compression_request:
+            # Publish compression request to Gemini queue
+            # Mark it specially so we know it's a compression request
+            compression_request.metadata = {"type": "compression", "chat_id": str(chat_id)}
+            await self._publish_compression_request(compression_request)
+
+    async def _publish_compression_request(self, request: GeminiRequestMessage) -> None:
+        """Publish a compression request to RabbitMQ."""
+        import aio_pika
+
+        if not self.channel:
+            logger.error("Cannot publish compression request: channel not connected")
+            return
+
+        try:
+            message = aio_pika.Message(
+                body=request.model_dump_json().encode(),
+                content_type="application/json",
+            )
+
+            # Publish to gemini.requests queue
+            await self.channel.default_exchange.publish(
+                message,
+                routing_key="gemini.requests",
+            )
+
+            logger.info(f"Published compression request | request_id={request.request_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to publish compression request: {e}")
+
+    async def _handle_compression_response(
+        self,
+        db: AsyncSession,
+        response: GeminiResponseMessage
+    ) -> None:
+        """Handle response from compression request."""
+        if response.status != "success" or not response.content:
+            logger.error(f"Compression failed for request_id={response.request_id}: {response.error}")
+            return
+
+        metadata = response.metadata or {}
+        chat_id_str = metadata.get('chat_id')
+
+        if not chat_id_str:
+            logger.error("Compression response missing chat_id in metadata")
+            return
+
+        chat_id = uuid.UUID(chat_id_str)
+
+        # Apply compression
+        await CompressionService.apply_compression(db, chat_id, response.content)
+
+        logger.info(f"History compression applied | chat_id={chat_id}")
 
     async def stop(self) -> None:
         """

@@ -110,14 +110,19 @@ class GeminiWorker:
                     usage=usage,
                     processing_time_ms=processing_time_ms,
                     model_used=request.model,
+                    metadata=request.metadata,
                 )
 
                 await self.publisher.publish(response, request.callback_queue)
                 await message.ack()
 
                 logger.info(
-                    f"[{request_id}] Request processed successfully "
-                    f"(time: {processing_time_ms:.2f}ms)"
+                    f"[{request_id}] Request processed successfully | "
+                    f"model={request.model} | "
+                    f"prompt_tokens={usage.prompt_tokens} | "
+                    f"completion_tokens={usage.completion_tokens} | "
+                    f"total_tokens={usage.total_tokens} | "
+                    f"time_ms={processing_time_ms:.2f}"
                 )
 
             except RateLimitError as e:
@@ -148,6 +153,7 @@ class GeminiWorker:
                 status="error",
                 error=str(e),
                 processing_time_ms=processing_time_ms,
+                metadata=request.metadata,
             )
 
             await self.publisher.publish(response, request.callback_queue)
@@ -177,6 +183,7 @@ class GeminiWorker:
                 request_id=request.request_id,
                 status="error",
                 error=f"Rate limit exceeded after {settings.QUEUE_MAX_RETRIES} retries",
+                metadata=request.metadata,
             )
 
             await self.publisher.publish(response, request.callback_queue)
@@ -229,7 +236,7 @@ class GeminiWorker:
 async def main() -> None:
     """Main entry point."""
     # Setup logging
-    setup_logging(settings.LOG_LEVEL)
+    setup_logging(settings.LOG_LEVEL, settings.LOG_FORMAT)
 
     logger.info("=" * 60)
     logger.info("Gemini Client Worker")
@@ -238,7 +245,7 @@ async def main() -> None:
     logger.info(f"Response queue: {settings.RESPONSE_QUEUE}")
     logger.info(f"API keys count: {len(settings.get_api_keys())}")
     logger.info(f"Max requests per key: {settings.KEYS_MAX_PER_MINUTE}/min")
-    logger.info(f"Default model: {settings.GEMINI_MODEL_TEXT}")
+    logger.info(f"Default model: {settings.OPENROUTER_MODEL}")
     logger.info(f"HTTP proxy: {settings.HTTP_PROXY or 'disabled'}")
     logger.info("=" * 60)
 

@@ -1,34 +1,50 @@
-# OpenRouter Client Worker
+Metadata-Version: 2.4
+Name: gemini-client
+Version: 0.1.0
+Summary: Universal RabbitMQ worker for Gemini API with multi-key rotation and rate limit handling
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: google-genai[aiohttp]>=1.0.0
+Requires-Dist: aio-pika>=9.0.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: pydantic-settings>=2.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: pytest-mock>=3.11.0; extra == "dev"
+Requires-Dist: black>=23.7.0; extra == "dev"
+Requires-Dist: ruff>=0.0.280; extra == "dev"
+Requires-Dist: mypy>=1.4.0; extra == "dev"
 
-Universal RabbitMQ worker for OpenRouter API with rate limit handling and Gemini model support.
+# Gemini Client Worker
 
-> **Note**: This worker is part of the Day 1 Chat Application stack.
-> Configuration is managed via the root `.env` file and the root `docker-compose.yml`.
-> See the [main README](../README.md) for full setup instructions.
+Universal RabbitMQ worker for Gemini API with multi-key rotation and rate limit handling.
 
 ## Features
 
-- **OpenRouter integration**: Uses OpenRouter API for accessing Gemini models
+- **Multi-key rotation**: Round-robin rotation across multiple Gemini API keys
 - **Rate limit handling**: Automatic cooldown and retry with escalating delays
 - **Async architecture**: Built with asyncio and aio-pika for high performance
 - **Message queue**: RabbitMQ-based request/response pattern
 - **HTTP proxy support**: Optional proxy configuration for API requests
 - **Graceful shutdown**: Handles SIGTERM/SIGINT signals properly
 - **Horizontal scaling**: Run multiple workers concurrently
-- **Legacy support**: Fallback to direct Gemini API if OpenRouter key not configured
 
 ## Architecture
 
 ```
 RabbitMQ Queue (gemini.requests)
           ↓
-    OpenRouter Worker
+    Gemini Worker
           ↓
-    OpenRouter API Client
+    Key Manager (round-robin)
+          ↓
+    Gemini API Client
           ↓
    [Optional Proxy]
           ↓
-    OpenRouter (google/gemini-2.5-flash)
+    Gemini API
           ↓
 RabbitMQ Queue (gemini.responses)
 ```
@@ -37,11 +53,12 @@ RabbitMQ Queue (gemini.responses)
 
 ### Using Docker (Recommended)
 
-The worker is started as part of the full stack via the root `docker-compose.yml`:
-
 ```bash
-# From the root directory
-docker-compose up -d gemini-client
+# Build image
+docker build -t gemini-client .
+
+# Run worker
+docker run --env-file .env gemini-client
 ```
 
 ### Manual Installation
@@ -56,47 +73,51 @@ pip install -e ".[dev]"
 
 ## Configuration
 
-Configuration is done via the root `.env` file. See the [main README](../README.md) for details.
+Copy `.env.example` to `.env` and configure:
 
-**Key environment variables:**
+```bash
+# RabbitMQ
+RABBITMQ_URL=amqp://user:password@localhost:5672/
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `RABBITMQ_URL` | RabbitMQ connection string | - |
-| `OPENROUTER_API_KEYS` | OpenRouter API key | - |
-| `OPENROUTER_MODEL` | Model to use | `google/gemini-2.5-flash` |
-| `HTTP_PROXY` | Proxy URL | `http://hysteria2:8080` |
-| `KEYS_MAX_PER_MINUTE` | Rate limit per key | `10` |
-| `QUEUE_RETRY_DELAYS` | Retry delays (seconds) | `60,600,3600,86400` |
+# Gemini API Keys (comma-separated)
+GEMINI_API_KEYS=key1,key2,key3
 
-### Getting OpenRouter API Key
+# Rate Limiting
+KEYS_MAX_PER_MINUTE=10
+KEYS_COOLDOWN_SECONDS=60
 
-1. Sign up at [OpenRouter](https://openrouter.ai/)
-2. Go to [API Keys](https://openrouter.ai/keys) section
-3. Create a new API key
-4. Copy the key (starts with `sk-or-v1-`)
-5. Add credits to your account for API usage
-6. (Optional) Configure site URL and name for dashboard attribution
+# Queue Retry (escalating delays in seconds)
+QUEUE_RETRY_DELAYS=60,600,3600,86400
+QUEUE_MAX_RETRIES=4
+
+# HTTP Proxy (optional)
+HTTP_PROXY=http://localhost:8080
+```
 
 ## Usage
 
 ### Running the Worker
 
 ```bash
-# As part of full stack (recommended)
-cd ..  # go to root directory
-docker-compose up -d
-
-# Standalone Python (for development)
+# Using Python
 python -m src.main
+
+# Using Docker
+docker run --env-file .env gemini-client
 ```
 
 ### Horizontal Scaling
 
-Scale the worker via Docker Compose:
+Run multiple workers to increase throughput:
 
 ```bash
-docker-compose up -d --scale gemini-client=3
+# Docker Compose example
+services:
+  gemini-worker:
+    image: gemini-client
+    env_file: .env
+    deploy:
+      replicas: 3
 ```
 
 ## Message Schemas
@@ -202,33 +223,25 @@ mypy src
 Structured logging with request tracking:
 
 ```
-2025-01-01 00:00:00 - src.main - INFO - OpenRouter Worker setup complete
+2025-01-01 00:00:00 - src.main - INFO - Gemini Worker setup complete
 2025-01-01 00:00:01 - src.worker.consumer - INFO - [uuid] Received request (retry_count=0)
-2025-01-01 00:00:02 - src.client.openrouter - INFO - [uuid] Content generated (tokens: 160, time: 1234.56ms)
+2025-01-01 00:00:02 - src.client.gemini - INFO - [uuid] Content generated (tokens: 160, time: 1234.56ms)
 2025-01-01 00:00:03 - src.worker.publisher - INFO - Published response for request uuid
 ```
 
 ## Troubleshooting
 
-### Authentication errors (401)
+### All keys rate limited
 
-Check that your `OPENROUTER_API_KEY` is valid and has sufficient credits:
-
-```
-- src.client.openrouter - ERROR - Authentication error: Invalid API key
-```
-
-Solution: Verify API key at [OpenRouter Keys](https://openrouter.ai/keys) and ensure account has credits
-
-### Rate limit errors (429)
-
-OpenRouter enforces rate limits based on your account tier:
+Check logs for key status:
 
 ```
-- src.client.openrouter - WARNING - Rate limit hit, will retry with backoff
+- src.client.key_manager - WARNING - No available API keys at the moment
+- src.client.key_manager - INFO - API Keys Status:
+  Key 0 (xxxxxxxx...): usage=10/10, cooldown=45.2s, total=1234, rate_limits=5
 ```
 
-Solution: Wait for cooldown or upgrade your OpenRouter account tier
+Solution: Wait for cooldown to expire or add more API keys
 
 ### Messages stuck in queue
 
@@ -237,10 +250,6 @@ Check worker status and RabbitMQ connection. Ensure worker is running and can co
 ### Proxy connection issues
 
 Verify `HTTP_PROXY` configuration and proxy server availability.
-
-### Model not available
-
-Ensure `OPENROUTER_MODEL` is set to a valid model ID (e.g., `google/gemini-2.5-flash`). Check [OpenRouter Models](https://openrouter.ai/models) for available models.
 
 ## License
 

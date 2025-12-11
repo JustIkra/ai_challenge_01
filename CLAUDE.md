@@ -2,27 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Режим работы: Оркестратор агентов
+## Orchestrator Mode
 
-По умолчанию Claude работает как **оркестратор агентов**:
+By default, Claude operates as an **agent orchestrator**:
 
-1. **Читает тикеты** из `.memory-base/master/`
-2. **Создаёт подзадачи** в `.memory-base/worker/`
-3. **Делегирует работу** субагентам через Task tool
-4. **Собирает результаты** и обновляет статусы
+1. **Read tickets** from `.task/`
+2. **Create subtasks** for subagents
+3. **Delegate work** via Task tool
+4. **Collect results** and update ticket statuses
 
-> **ВАЖНО:** После выполнения задачи **обязательно обновить статус тикета** на `done` и отметить выполненные Acceptance Criteria (`[x]`).
+> **IMPORTANT:** After completing a task, always update ticket status and mark completed Acceptance Criteria (`[x]`).
 
-**Полное описание процесса:** [.memory-base/workflow/README.md](.memory-base/workflow/README.md)
+### Subagent Types
 
-### Типы субагентов
-
-| Тип | Когда использовать |
-|-----|-------------------|
-| `Explore` | Исследование кодовой базы, поиск файлов |
-| `Plan` | Планирование реализации |
-| `general-purpose` | Сложные многошаговые задачи |
-| `code-reviewer` | Ревью кода |
+| Type | When to use |
+|------|-------------|
+| `Explore` | Codebase exploration, file search |
+| `Plan` | Implementation planning |
+| `general-purpose` | Complex multi-step tasks |
+| `code-reviewer` | Code review |
 
 ---
 
@@ -46,40 +44,83 @@ PostgreSQL ← Backend → Redis
 
 **Two repositories:**
 - `day1-app` (this repo): Vue frontend, FastAPI backend, Docker Compose
-- `gemini-client`: Separate RabbitMQ worker for Gemini API
+- `gemini-client`: Separate RabbitMQ worker for Gemini API (included as subdirectory)
 
 ## Commands
 
 ### Docker
 ```bash
-docker-compose up -d              # Start all services
-docker-compose up -d --build      # Rebuild after changes
-docker-compose logs -f            # View logs
-docker-compose down               # Stop services
+docker-compose up -d                    # Start all services
+docker-compose up -d --build            # Rebuild and start
+docker-compose logs -f <service>        # View logs (backend, frontend, gemini-client)
+docker-compose down                     # Stop services
+docker-compose down -v                  # Stop and remove volumes (destroys data)
 ```
 
 ### Backend (Python 3.11+)
 ```bash
 cd backend
-pip install -e ".[dev]"
-uvicorn app.main:app --reload
-pytest
+pip install -e ".[dev]"                 # Install with dev dependencies
+uvicorn app.main:app --reload           # Run dev server
+alembic upgrade head                    # Run migrations
+alembic revision --autogenerate -m "description"  # Create migration
+
+# Testing
+pytest                                  # Run all tests
+pytest tests/test_specific.py           # Run single file
+pytest tests/test_specific.py::test_name  # Run single test
+pytest --cov=app                        # Run with coverage
+
+# Linting
+black app tests                         # Format code
+ruff check app tests                    # Lint
+mypy app                                # Type check
 ```
 
 ### Frontend (Node 20+)
 ```bash
 cd frontend
-npm install
-npm run dev
-npm run test
+npm install                             # Install dependencies
+npm run dev                             # Run dev server
+npm run build                           # Build for production
+
+# Testing
+npm run test                            # Run tests (vitest)
+npm run test -- tests/specific.test.ts  # Run single file
+
+# Linting
+npm run lint                            # ESLint
 ```
+
+### Gemini Client Worker
+```bash
+cd gemini-client
+pip install -e ".[dev]"                 # Install with dev dependencies
+python -m src.main                      # Run worker
+
+# Testing
+pytest                                  # Run all tests
+pytest --cov=src                        # Run with coverage
+
+# Linting
+black src tests
+ruff check src tests
+mypy src
+```
+
+## Key Configuration
+
+| Variable | Description |
+|----------|-------------|
+| `GEMINI_API_KEYS` | Comma-separated Gemini API keys |
+| `KEYS_MAX_PER_MINUTE` | Rate limit per key (default: 10) |
+| `QUEUE_RETRY_DELAYS` | Retry delays in seconds (default: 60,600,3600,86400) |
+| `HTTP_PROXY` | Hysteria2 proxy URL |
 
 ## Documentation
 
-| Путь | Содержание |
-|------|------------|
-| `.memory-base/workflow/` | Процесс работы оркестратора |
-| `.memory-base/master/` | Входящие тикеты |
-| `.memory-base/worker/` | Тикеты для субагентов |
-| `.memory-base/technical-docs/` | Техническая документация |
-| `.env.example` | Переменные окружения |
+| Path | Contents |
+|------|----------|
+| `.task/` | Current tasks/tickets |
+| `.memory-base/technical-docs/` | Technical documentation |
+| `.env.example` | Environment variables template |

@@ -13,10 +13,13 @@
     >
       <div class="whitespace-pre-wrap break-words">{{ message.content }}</div>
       <div
-        class="text-xs mt-1"
+        class="text-xs mt-1 flex items-center gap-2"
         :class="message.role === 'user' ? 'text-blue-200' : 'text-gray-400'"
       >
-        {{ formatTime(message.created_at) }}
+        <span>{{ formatTime(message.created_at) }}</span>
+        <span v-if="message.role === 'assistant' && message.token_usage" class="text-gray-500">
+          · Запрос: {{ message.token_usage.prompt_tokens }} · Ответ: {{ message.token_usage.completion_tokens }}
+        </span>
       </div>
     </div>
   </div>

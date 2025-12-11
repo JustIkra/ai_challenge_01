@@ -61,8 +61,8 @@ cp .env.example .env
 
 3. Edit `.env` and configure:
 ```bash
-# Required: Add your Gemini API keys
-GEMINI_API_KEYS=your_key_1,your_key_2,your_key_3
+# Required: Add your OpenRouter API key (get from https://openrouter.ai/keys)
+OPENROUTER_API_KEYS=your_openrouter_api_key
 
 # Required: Set secure passwords
 DB_PASSWORD=your_secure_db_password
@@ -70,6 +70,9 @@ RABBITMQ_PASSWORD=your_secure_rabbitmq_password
 
 # Optional: Configure Hysteria2 proxy in hysteria/config.yaml
 ```
+
+> **Note**: This project uses a single `.env` file and single `docker-compose.yml` for the entire stack.
+> All services (backend, frontend, gemini-client) are configured from the root `.env` file.
 
 4. Start all services:
 ```bash
@@ -94,13 +97,24 @@ docker-compose logs -f
 
 ## Environment Variables
 
+> **Important**: All environment variables are configured in a single root `.env` file.
+> There are no separate `.env` files for individual services.
+
 ### Required Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `GEMINI_API_KEYS` | Comma-separated Gemini API keys | `key1,key2,key3` |
+| `OPENROUTER_API_KEYS` | OpenRouter API key(s) | `sk-or-v1-xxxxx` |
 | `DB_PASSWORD` | PostgreSQL password | `secure_password_123` |
 | `RABBITMQ_PASSWORD` | RabbitMQ password | `secure_password_456` |
+
+### OpenRouter Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENROUTER_API_KEYS` | API key from openrouter.ai | - |
+| `OPENROUTER_BASE_URL` | OpenRouter API endpoint | `https://openrouter.ai/api/v1` |
+| `OPENROUTER_MODEL` | Model to use | `google/gemini-2.5-flash` |
 
 ### Database Configuration
 

@@ -32,6 +32,14 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
+  # === Proxy ===
+  hysteria2:
+    image: tobyxdd/hysteria
+    command: ["client", "-c", "/etc/hysteria/config.yaml"]
+    volumes:
+      - ./hysteria/config.yaml:/etc/hysteria/config.yaml:ro
+    restart: unless-stopped
+
   # === Application ===
   backend:
     build: ./backend
@@ -39,7 +47,7 @@ services:
       - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/chatapp
       - REDIS_URL=redis://redis:6379
       - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
-      - GEMINI_MODEL_TEXT=${GEMINI_MODEL_TEXT:-gemini-2.5-flash}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.5-flash}
     depends_on:
       - postgres
       - redis
@@ -49,6 +57,34 @@ services:
     build: ./frontend
     expose:
       - "5173"
+
+  gemini-client:
+    build: ./gemini-client
+    environment:
+      # RabbitMQ
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      - REQUEST_QUEUE=${REQUEST_QUEUE:-gemini.requests}
+      - RESPONSE_QUEUE=${RESPONSE_QUEUE:-gemini.responses}
+      # OpenRouter
+      - OPENROUTER_API_KEYS=${OPENROUTER_API_KEYS}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.5-flash}
+      # Rate Limiting
+      - KEYS_MAX_PER_MINUTE=${KEYS_MAX_PER_MINUTE:-10}
+      - KEYS_COOLDOWN_SECONDS=${KEYS_COOLDOWN_SECONDS:-60}
+      # Queue Retry
+      - QUEUE_RETRY_DELAYS=${QUEUE_RETRY_DELAYS:-60,600,3600,86400}
+      - QUEUE_MAX_RETRIES=${QUEUE_MAX_RETRIES:-4}
+      # Proxy (via hysteria2 service)
+      - HTTP_PROXY=${HTTP_PROXY:-http://hysteria2:8080}
+      - HTTPS_PROXY=${HTTPS_PROXY:-http://hysteria2:8080}
+      # Logging & Worker
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WORKER_PREFETCH_COUNT=${WORKER_PREFETCH_COUNT:-10}
+    depends_on:
+      - rabbitmq
+      - hysteria2
+    restart: unless-stopped
 
 volumes:
   postgres_data:

@@ -60,6 +60,51 @@
             </p>
           </div>
 
+          <!-- History Compression -->
+          <div class="mb-6 p-4 bg-gray-700/50 rounded-lg">
+            <div class="flex items-center justify-between mb-3">
+              <label class="text-sm font-medium text-gray-300">
+                History Compression
+              </label>
+              <button
+                type="button"
+                @click="formData.history_compression_enabled = !formData.history_compression_enabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                  formData.history_compression_enabled ? 'bg-blue-600' : 'bg-gray-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                    formData.history_compression_enabled ? 'translate-x-6' : 'translate-x-1'
+                  ]"
+                />
+              </button>
+            </div>
+            <p class="text-xs text-gray-400 mb-3">
+              Automatically summarize old messages to reduce token usage while preserving context.
+            </p>
+
+            <div v-if="formData.history_compression_enabled" class="mt-3">
+              <label class="block text-sm font-medium text-gray-300 mb-2">
+                Compress after {{ formData.history_compression_message_limit }} messages
+              </label>
+              <input
+                v-model.number="formData.history_compression_message_limit"
+                type="range"
+                min="5"
+                max="50"
+                step="5"
+                class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
+              <div class="flex justify-between text-xs text-gray-500 mt-1">
+                <span>5</span>
+                <span>50</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Buttons -->
           <div class="flex justify-end gap-3">
             <button
@@ -101,7 +146,9 @@ const emit = defineEmits<{
 const formData = ref<ChatUpdate>({
   title: '',
   system_prompt: '',
-  temperature: 0.7
+  temperature: 0.7,
+  history_compression_enabled: false,
+  history_compression_message_limit: 10
 })
 
 const isSaving = ref(false)
@@ -111,7 +158,9 @@ watch(() => props.chat, (newChat) => {
     formData.value = {
       title: newChat.title || '',
       system_prompt: newChat.system_prompt || '',
-      temperature: newChat.temperature ?? 0.7
+      temperature: newChat.temperature ?? 0.7,
+      history_compression_enabled: newChat.history_compression_enabled ?? false,
+      history_compression_message_limit: newChat.history_compression_message_limit ?? 10
     }
   }
 }, { immediate: true })

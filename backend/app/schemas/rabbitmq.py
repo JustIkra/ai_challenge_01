@@ -23,19 +23,20 @@ class GeminiRequestMessage(BaseModel):
 
     request_id: uuid.UUID
     prompt: str
-    model: str = "gemini-2.5-flash"
+    model: str = "google/gemini-2.5-flash"
     parameters: GenerationParameters = Field(default_factory=GenerationParameters)
     system_instruction: str | None = None
     callback_queue: str = "gemini.responses"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     retry_count: int = Field(default=0, ge=0)
+    metadata: dict | None = None
 
     class Config:
         json_schema_extra = {
             "example": {
                 "request_id": "550e8400-e29b-41d4-a716-446655440000",
                 "prompt": "What is the capital of France?",
-                "model": "gemini-2.5-flash",
+                "model": "google/gemini-2.5-flash",
                 "parameters": {
                     "temperature": 0.7,
                     "max_output_tokens": 8192,
@@ -54,6 +55,7 @@ class TokenUsage(BaseModel):
 
     prompt_tokens: int = Field(ge=0)
     completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
 
 
 class GeminiResponseMessage(BaseModel):
@@ -65,6 +67,9 @@ class GeminiResponseMessage(BaseModel):
     error: str | None = None
     usage: TokenUsage | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    metadata: dict | None = None
+    model_used: str | None = None
+    processing_time_ms: float = 0.0
 
     class Config:
         json_schema_extra = {
@@ -75,7 +80,8 @@ class GeminiResponseMessage(BaseModel):
                 "error": None,
                 "usage": {
                     "prompt_tokens": 10,
-                    "completion_tokens": 8
+                    "completion_tokens": 8,
+                    "total_tokens": 18
                 },
                 "timestamp": "2024-01-01T00:00:01Z"
             }

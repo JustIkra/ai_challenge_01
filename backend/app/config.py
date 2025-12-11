@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     # RabbitMQ
     RABBITMQ_URL: str
 
-    # Gemini Model
-    GEMINI_MODEL_TEXT: str = "gemini-2.5-flash"
+    # OpenRouter Model (full model ID, e.g., "google/gemini-2.5-flash")
+    OPENROUTER_MODEL: str = "google/gemini-2.5-flash"
 
     # API Settings
     API_V1_PREFIX: str = "/api"

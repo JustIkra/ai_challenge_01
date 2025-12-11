@@ -1,12 +1,9 @@
-"""Gemini API async client with retry logic."""
+"""OpenRouter API async client with retry logic."""
 import logging
-import os
 import time
 from typing import Any, Optional
 
-from google import genai
-from google.genai import types
-from google.genai.types import GenerateContentConfig
+import httpx
 
 from ..schemas.request import GenerationParameters
 from ..schemas.response import TokenUsage
@@ -15,31 +12,47 @@ from ..utils.retry import LocationError, RateLimitError, with_rate_limit_retry
 logger = logging.getLogger(__name__)
 
 
-class GeminiAsyncClient:
-    """Async client for Gemini API with retry logic."""
+class OpenRouterClient:
+    """Async client for OpenRouter API with retry logic."""
 
-    def __init__(self, proxy_url: Optional[str] = None):
-        """Initialize Gemini client.
+    def __init__(
+        self,
+        base_url: str = "https://openrouter.ai/api/v1",
+        proxy_url: Optional[str] = None,
+        site_url: Optional[str] = None,
+        site_name: Optional[str] = None,
+    ):
+        """Initialize OpenRouter client.
 
         Args:
+            base_url: OpenRouter API base URL
             proxy_url: Optional HTTP proxy URL
+            site_url: Optional site URL for HTTP-Referer header
+            site_name: Optional site name for X-Title header
         """
+        self.base_url = base_url.rstrip("/")
         self.proxy_url = proxy_url
-        self._setup_proxy()
+        self.site_url = site_url
+        self.site_name = site_name
 
-        logger.info(
-            f"GeminiAsyncClient initialized "
-            f"(proxy: {'enabled' if proxy_url else 'disabled'})"
+        # Create async HTTP client with timeout and proxy
+        timeout = httpx.Timeout(
+            connect=10.0,
+            read=120.0,
+            write=10.0,
+            pool=10.0,
+        )
+        self._client = httpx.AsyncClient(
+            timeout=timeout,
+            proxy=proxy_url,
+            follow_redirects=True,
         )
 
-    def _setup_proxy(self) -> None:
-        """Setup HTTP proxy environment variables if configured."""
-        if self.proxy_url:
-            os.environ["HTTP_PROXY"] = self.proxy_url
-            os.environ["HTTPS_PROXY"] = self.proxy_url
-            os.environ["http_proxy"] = self.proxy_url
-            os.environ["https_proxy"] = self.proxy_url
-            logger.info(f"HTTP proxy configured: {self.proxy_url}")
+        logger.info(
+            f"OpenRouterClient initialized "
+            f"(base_url: {self.base_url}, "
+            f"proxy: {'enabled' if proxy_url else 'disabled'})"
+        )
 
     @with_rate_limit_retry(max_retries=3, base_delay=5.0, max_delay=60.0)
     async def generate_content(
@@ -51,12 +64,12 @@ class GeminiAsyncClient:
         request_id: str,
         system_instruction: str | None = None,
     ) -> tuple[str, TokenUsage]:
-        """Generate content using Gemini API.
+        """Generate content using OpenRouter API.
 
         Args:
-            api_key: Gemini API key to use
+            api_key: OpenRouter API key to use
             prompt: User prompt
-            model: Model name (e.g., "gemini-pro")
+            model: Model name (e.g., "google/gemini-2.5-flash")
             parameters: Generation parameters
             request_id: Request ID for logging
             system_instruction: Optional system instruction for the model
@@ -66,32 +79,45 @@ class GeminiAsyncClient:
 
         Raises:
             RateLimitError: When rate limit (429) is hit
+            LocationError: When location is not supported
+            ValueError: For invalid API key or other client errors
             Exception: For other API errors
         """
         start_time = time.time()
 
         try:
-            # Create client with API key
-            http_options = (
-                types.HttpOptions(
-                    client_args={"proxy": self.proxy_url},
-                    async_client_args={"proxy": self.proxy_url},
-                )
-                if self.proxy_url
-                else None
-            )
-            client = genai.Client(api_key=api_key, http_options=http_options)
+            # Build messages array
+            messages = []
+            if system_instruction:
+                messages.append({"role": "system", "content": system_instruction})
+            messages.append({"role": "user", "content": prompt})
 
-            # Prepare generation config
-            config = GenerateContentConfig(
-                temperature=parameters.temperature,
-                top_p=parameters.top_p,
-                top_k=parameters.top_k,
-                max_output_tokens=parameters.max_output_tokens,
-                candidate_count=parameters.candidate_count,
-                stop_sequences=parameters.stop_sequences,
-                system_instruction=system_instruction,
-            )
+            # Convert GenerationParameters to OpenRouter format
+            # Note: top_k is not supported by OpenRouter API, will be ignored
+            request_body = {
+                "model": model,
+                "messages": messages,
+            }
+
+            # Add optional parameters only if they are set
+            if parameters.temperature is not None:
+                request_body["temperature"] = parameters.temperature
+            if parameters.top_p is not None:
+                request_body["top_p"] = parameters.top_p
+            if parameters.max_output_tokens is not None:
+                request_body["max_tokens"] = parameters.max_output_tokens
+            if parameters.stop_sequences:
+                request_body["stop"] = parameters.stop_sequences
+
+            # Build headers
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            if self.site_url:
+                headers["HTTP-Referer"] = self.site_url
+            if self.site_name:
+                headers["X-Title"] = self.site_name
 
             logger.debug(
                 f"[{request_id}] Generating content with model={model}, "
@@ -99,74 +125,154 @@ class GeminiAsyncClient:
                 f"max_tokens={parameters.max_output_tokens}"
             )
 
-            # Generate content
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=config,
+            # Make API request
+            response = await self._client.post(
+                f"{self.base_url}/chat/completions",
+                json=request_body,
+                headers=headers,
             )
 
-            # Extract text from response
-            generated_text = self._extract_text_from_response(response)
-            finish_reason = self._get_finish_reason(response)
-            usage_metadata = getattr(response, "usage_metadata", None)
+            # Handle response status codes
+            if response.status_code == 429:
+                logger.warning(
+                    f"[{request_id}] Rate limit hit "
+                    f"(key: {api_key[:8]}..., status: 429)"
+                )
+                raise RateLimitError(
+                    f"Rate limit exceeded: {response.text}"
+                )
+
+            if response.status_code == 401:
+                logger.error(
+                    f"[{request_id}] Invalid API key "
+                    f"(key: {api_key[:8]}...)"
+                )
+                raise ValueError(
+                    f"Invalid API key: {response.text}"
+                )
+
+            if response.status_code == 400:
+                error_detail = response.text
+                logger.error(
+                    f"[{request_id}] Bad request: {error_detail}"
+                )
+                raise ValueError(
+                    f"Bad request to OpenRouter API: {error_detail}"
+                )
+
+            if response.status_code >= 500:
+                logger.error(
+                    f"[{request_id}] Server error: {response.status_code}"
+                )
+                raise Exception(
+                    f"OpenRouter server error ({response.status_code}): {response.text}"
+                )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"[{request_id}] Unexpected status code: {response.status_code}"
+                )
+                raise Exception(
+                    f"Unexpected response from OpenRouter ({response.status_code}): {response.text}"
+                )
+
+            # Parse response JSON
+            response_data = response.json()
+
+            # Extract generated text
+            choices = response_data.get("choices", [])
+            if not choices:
+                logger.error(
+                    f"[{request_id}] Empty choices in response"
+                )
+                raise ValueError("Empty choices in OpenRouter API response")
+
+            first_choice = choices[0]
+            message = first_choice.get("message", {})
+            generated_text = message.get("content", "")
+            finish_reason = first_choice.get("finish_reason")
 
             if not generated_text:
-                details = []
-                if finish_reason:
-                    details.append(f"finish_reason={finish_reason}")
-                detail_msg = f" ({'; '.join(details)})" if details else ""
+                detail_msg = f" (finish_reason={finish_reason})" if finish_reason else ""
                 logger.error(
-                    f"[{request_id}] Empty response from Gemini API{detail_msg}"
+                    f"[{request_id}] Empty response from OpenRouter API{detail_msg}"
                 )
-                raise ValueError(f"Empty response from Gemini API{detail_msg}")
+                raise ValueError(f"Empty response from OpenRouter API{detail_msg}")
 
             # Log warning if response was truncated due to max tokens
-            if finish_reason and "MAX_TOKENS" in str(finish_reason):
+            if finish_reason == "length":
                 logger.warning(
-                    f"[{request_id}] Response truncated due to max_output_tokens limit "
+                    f"[{request_id}] Response truncated due to max_tokens limit "
                     f"(limit: {parameters.max_output_tokens})"
                 )
 
-            # Extract token usage (already captured from streaming)
-            if usage_metadata:
-                token_usage = TokenUsage(
-                    prompt_tokens=getattr(usage_metadata, "prompt_token_count", 0),
-                    completion_tokens=getattr(usage_metadata, "candidates_token_count", 0),
-                    total_tokens=getattr(usage_metadata, "total_token_count", 0),
-                )
-            else:
-                # Fallback if usage metadata not available
-                token_usage = TokenUsage(
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    total_tokens=0,
-                )
+            # Extract token usage
+            usage = response_data.get("usage", {})
+            token_usage = TokenUsage(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+            )
 
             elapsed_time = (time.time() - start_time) * 1000
             logger.info(
-                f"[{request_id}] Content generated successfully "
-                f"(tokens: {token_usage.total_tokens}, time: {elapsed_time:.2f}ms)"
+                f"[{request_id}] Content generated successfully | "
+                f"model={model} | "
+                f"prompt_tokens={token_usage.prompt_tokens} | "
+                f"completion_tokens={token_usage.completion_tokens} | "
+                f"total_tokens={token_usage.total_tokens} | "
+                f"time_ms={elapsed_time:.2f}"
             )
 
             return generated_text, token_usage
 
-        except Exception as e:
-            error_msg = str(e).lower()
-            elapsed_time = (time.time() - start_time) * 1000
+        except (RateLimitError, LocationError, ValueError):
+            # Re-raise known exceptions as-is
+            raise
 
-            if "user location is not supported for the api use" in error_msg:
+        except httpx.HTTPStatusError as e:
+            elapsed_time = (time.time() - start_time) * 1000
+            error_msg = str(e).lower()
+
+            # Check for location errors
+            if "location" in error_msg or "region" in error_msg:
                 logger.warning(
-                    f"[{request_id}] Gemini API blocked by location. "
+                    f"[{request_id}] API blocked by location. "
                     f"Proxy may have failed, will retry... "
                     f"(proxy: {self.proxy_url or 'none'})"
                 )
                 raise LocationError(
-                    "Gemini API rejected the request because the location is not supported. "
+                    "OpenRouter API rejected the request because the location is not supported. "
                     "Proxy connection may be unstable."
                 ) from e
 
-            # Check for rate limit errors
+            logger.error(
+                f"[{request_id}] HTTP error "
+                f"(key: {api_key[:8]}..., time: {elapsed_time:.2f}ms): {e}"
+            )
+            raise
+
+        except httpx.TimeoutException as e:
+            elapsed_time = (time.time() - start_time) * 1000
+            logger.error(
+                f"[{request_id}] Request timeout "
+                f"(key: {api_key[:8]}..., time: {elapsed_time:.2f}ms): {e}"
+            )
+            raise Exception(f"Request timeout: {e}") from e
+
+        except httpx.RequestError as e:
+            elapsed_time = (time.time() - start_time) * 1000
+            logger.error(
+                f"[{request_id}] Request error "
+                f"(key: {api_key[:8]}..., time: {elapsed_time:.2f}ms): {e}"
+            )
+            raise Exception(f"Request error: {e}") from e
+
+        except Exception as e:
+            elapsed_time = (time.time() - start_time) * 1000
+            error_msg = str(e).lower()
+
+            # Check for rate limit errors in exception message
             if "429" in error_msg or "rate limit" in error_msg or "quota" in error_msg:
                 logger.warning(
                     f"[{request_id}] Rate limit hit "
@@ -174,7 +280,18 @@ class GeminiAsyncClient:
                 )
                 raise RateLimitError(f"Rate limit exceeded: {e}")
 
-            # Check for other errors
+            # Check for location errors
+            if "location" in error_msg or "region" in error_msg:
+                logger.warning(
+                    f"[{request_id}] API blocked by location. "
+                    f"Proxy may have failed, will retry... "
+                    f"(proxy: {self.proxy_url or 'none'})"
+                )
+                raise LocationError(
+                    "OpenRouter API rejected the request because the location is not supported. "
+                    "Proxy connection may be unstable."
+                ) from e
+
             logger.error(
                 f"[{request_id}] API error "
                 f"(key: {api_key[:8]}..., time: {elapsed_time:.2f}ms): {e}"
@@ -183,89 +300,9 @@ class GeminiAsyncClient:
 
     async def close(self) -> None:
         """Cleanup client resources."""
-        # Clean up proxy environment variables if set
-        if self.proxy_url:
-            os.environ.pop("HTTP_PROXY", None)
-            os.environ.pop("HTTPS_PROXY", None)
-            os.environ.pop("http_proxy", None)
-            os.environ.pop("https_proxy", None)
+        await self._client.aclose()
+        logger.info("OpenRouterClient closed")
 
-        logger.info("GeminiAsyncClient closed")
 
-    def _extract_text_from_response(self, response: Any) -> str | None:
-        """Extract text from Gemini response, handling various response formats.
-
-        The SDK's response.text property may return None when finish_reason is
-        MAX_TOKENS, but the content might still be in candidates[0].content.parts.
-        """
-        # First try the simple text property
-        text = getattr(response, "text", None)
-        if text:
-            return text
-
-        # Fallback: extract from candidates directly
-        candidates = getattr(response, "candidates", None) or []
-        if not candidates:
-            return None
-
-        first_candidate = candidates[0]
-        content = getattr(first_candidate, "content", None)
-        if not content:
-            return None
-
-        parts = getattr(content, "parts", None) or []
-        if not parts:
-            return None
-
-        # Concatenate text from all parts
-        text_parts = []
-        for part in parts:
-            part_text = getattr(part, "text", None)
-            if part_text:
-                text_parts.append(part_text)
-
-        return "".join(text_parts) if text_parts else None
-
-    def _get_finish_reason(self, response: Any) -> Any:
-        """Extract finish_reason from response candidates."""
-        candidates = getattr(response, "candidates", None) or []
-        if candidates:
-            return getattr(candidates[0], "finish_reason", None)
-        return None
-
-    def _format_empty_response_details(self, response: Any) -> str:
-        """Build human-readable details when API returns no text."""
-        details: list[str] = []
-
-        prompt_feedback = getattr(response, "prompt_feedback", None)
-        if prompt_feedback:
-            block_reason = getattr(prompt_feedback, "block_reason", None)
-            if block_reason:
-                details.append(f"block_reason={block_reason}")
-            safety_ratings = getattr(prompt_feedback, "safety_ratings", None) or []
-            safety_summary = self._format_safety_ratings(safety_ratings)
-            if safety_summary:
-                details.append(f"prompt_safety={safety_summary}")
-
-        candidates = getattr(response, "candidates", None) or []
-        if candidates:
-            first_candidate = candidates[0]
-            finish_reason = getattr(first_candidate, "finish_reason", None)
-            if finish_reason:
-                details.append(f"finish_reason={finish_reason}")
-            safety_ratings = getattr(first_candidate, "safety_ratings", None) or []
-            safety_summary = self._format_safety_ratings(safety_ratings)
-            if safety_summary:
-                details.append(f"candidate_safety={safety_summary}")
-
-        return f" ({'; '.join(details)})" if details else ""
-
-    @staticmethod
-    def _format_safety_ratings(ratings: Any) -> str:
-        """Format safety ratings list into a readable string."""
-        formatted = []
-        for rating in ratings or []:
-            category = getattr(rating, "category", "unknown")
-            probability = getattr(rating, "probability", "unknown")
-            formatted.append(f"{category}:{probability}")
-        return ", ".join(formatted)
+# Alias for backward compatibility
+GeminiAsyncClient = OpenRouterClient

@@ -1,0 +1,7 @@
+server: vpn.vibe-labs.ru:8443
+auth: SenpaiCat2407
+tls:
+  sni: vpn.vibe-labs.ru
+
+http:
+  listen: 0.0.0.0:8080

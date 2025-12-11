@@ -1,6 +1,6 @@
 """Response schemas for Gemini API."""
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -25,6 +25,7 @@ class GeminiResponseMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     processing_time_ms: float | None = Field(default=None, ge=0)
     model_used: str | None = None
+    metadata: dict[str, Any] | None = None
 
     class Config:
         """Pydantic configuration."""

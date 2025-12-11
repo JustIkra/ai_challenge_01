@@ -19,6 +19,12 @@ class LocationError(Exception):
     pass
 
 
+class AuthenticationError(Exception):
+    """Exception raised when API authentication fails (401)."""
+
+    pass
+
+
 class APIError(Exception):
     """General API error."""
 
@@ -51,6 +57,11 @@ def with_rate_limit_retry(
             for attempt in range(max_retries + 1):
                 try:
                     return await func(*args, **kwargs)
+
+                except AuthenticationError as e:
+                    # Don't retry on authentication errors - they won't succeed
+                    logger.error(f"Authentication error in {func.__name__}: {e}")
+                    raise
 
                 except (RateLimitError, LocationError) as e:
                     last_exception = e

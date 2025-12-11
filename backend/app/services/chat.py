@@ -228,9 +228,18 @@ class ChatService:
         # Build conversation history
         conversation_parts = []
 
-        # Add previous messages from chat history
+        # Add compressed history summary if exists
+        if chat.compressed_history_summary:
+            conversation_parts.append(
+                f"[Previous conversation summary]\n{chat.compressed_history_summary}"
+            )
+
+        # Add only uncompressed previous messages from chat history
         if chat.messages:
             for msg in chat.messages:
+                # Skip compressed messages - they're represented by the summary
+                if getattr(msg, 'is_compressed', False):
+                    continue
                 if msg.status == "completed" and msg.content:
                     role = "User" if msg.role == "user" else "Assistant"
                     conversation_parts.append(f"{role}: {msg.content}")
@@ -247,7 +256,7 @@ class ChatService:
         return GeminiRequestMessage(
             request_id=request_id,
             prompt=prompt,
-            model=settings.GEMINI_MODEL_TEXT,
+            model=settings.OPENROUTER_MODEL,
             parameters=GenerationParameters(temperature=chat.temperature or 0.7),
             system_instruction=chat.system_prompt
         )

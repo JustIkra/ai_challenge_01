@@ -45,6 +45,7 @@ class MessageResponse(BaseModel):
     request_id: uuid.UUID | None
     status: str
     token_usage: dict | None
+    is_compressed: bool = False
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
