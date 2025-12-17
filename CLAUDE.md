@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Session Start
+
+При начале новой сессии вызови tool `get_summary` из reminder MCP-сервера, чтобы показать текущие задачи по проекту.
+
 ## Orchestrator Mode
 
 By default, Claude operates as an **agent orchestrator**:
