@@ -1,0 +1,17 @@
+{
+  "name": "reminder-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for managing project reminders/tasks stored in local JSON file.",
+  "type": "module",
+  "main": "index.mjs",
+  "bin": {
+    "reminder-mcp": "index.mjs"
+  },
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.25.0"
+  }
+}

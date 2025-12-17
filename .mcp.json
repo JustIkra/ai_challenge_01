@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "reminder": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/maksim/git_projects/ai_challenges/day 1/mcp/reminder/index.mjs"
+      ]
+    }
+  }
+}
