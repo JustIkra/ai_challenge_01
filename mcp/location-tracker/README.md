@@ -1,6 +1,10 @@
-# MCP: трекер текущего местоположения по IP
+# MCP: Location Tracker
 
-Простой MCP‑сервер `location-tracker-mcp`, который вызывает внешнее API геолокации по IP и возвращает примерное местоположение (город, страна, координаты) на основе публичного IP машины, где запущен агент.
+MCP-сервер для определения местоположения по публичному IP-адресу.
+
+## Описание
+
+`location-tracker-mcp` использует внешний API геолокации (ip-api.com) для определения приблизительного местоположения на основе публичного IP машины, где запущен агент.
 
 ## Установка
 
@@ -9,59 +13,73 @@ cd mcp/location-tracker
 npm install
 ```
 
-## Запуск MCP‑сервера
+## Запуск
 
 ```bash
-cd mcp/location-tracker
 npm start
 ```
 
-Сервер работает через stdio и совместим с MCP‑клиентами (Claude Desktop, Codex CLI и др.), которые умеют подключать MCP‑серверы.
+Сервер работает через stdio и совместим с MCP-клиентами (Claude Desktop, Claude Code и др.).
 
-## Регистрация в MCP‑клиенте (пример)
+## Регистрация в Claude Code
 
-В вашем MCP‑клиенте нужно добавить конфиг сервера. Пример для JSON‑конфига:
-
-```json
-{
-  "name": "location-tracker-mcp",
-  "command": "node",
-  "args": [
-    "/ABSOLUTE/PATH/TO/mcp/location-tracker/index.mjs"
-  ]
-}
-```
-
-Либо, если вы установили бинарь глобально (`npm install -g`):
+Добавьте в `~/.claude/claude_desktop_config.json`:
 
 ```json
 {
-  "name": "location-tracker-mcp",
-  "command": "location-tracker-mcp",
-  "args": []
+  "mcpServers": {
+    "location-tracker": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/TO/mcp/location-tracker/index.mjs"]
+    }
+  }
 }
 ```
 
-После перезапуска клиента агент увидит MCP‑сервер с инструментом:
+## Инструменты
 
-- `get-current-location` — возвращает текстовый JSON с информацией о текущем местоположении по IP.
+### `get-current-location`
 
-## Вызов инструмента агентом
+Возвращает приблизительное текущее местоположение по публичному IP.
 
-В интерфейсе MCP‑клиента (например, Claude Desktop):
+**Параметры:** нет
 
-- убедитесь, что сервер `location-tracker-mcp` активен;
-- попросите агента что-то вроде:
+**Пример ответа:**
+```json
+{
+  "ip": "203.0.113.42",
+  "city": "Moscow",
+  "region": "Moscow",
+  "country": "Russia",
+  "latitude": 55.7558,
+  "longitude": 37.6173,
+  "isp": "ISP Name"
+}
+```
 
-> Вызови MCP‑инструмент `get-current-location` из сервера `location-tracker-mcp` и покажи результат.
+## Архитектура
 
-Агент выполнит MCP‑вызов и вернёт ответ, содержащий JSON с полями:
+```
+┌─────────────────┐     stdio      ┌────────────────────┐
+│  MCP Client     │ ◄────────────► │ location-tracker   │
+│ (Claude Code)   │                │                    │
+└─────────────────┘                └─────────┬──────────┘
+                                             │
+                                             ▼ HTTP
+                                   ┌────────────────────┐
+                                   │   ip-api.com       │
+                                   │ (geolocation API)  │
+                                   └────────────────────┘
+```
 
-- `ip`
-- `city`
-- `region`
-- `country`
-- `latitude`
-- `longitude`
-- `org`
+## Зависимости
+
+- `@modelcontextprotocol/sdk` — MCP TypeScript SDK
+- `zod` — валидация схем
+
+## Ограничения
+
+- ip-api.com бесплатен для некоммерческого использования
+- Точность зависит от IP-провайдера
+- Требуется доступ к интернету
 
