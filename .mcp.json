@@ -6,6 +6,16 @@
       "args": [
         "/Users/maksim/git_projects/ai_challenges/day 1/mcp/reminder/index.mjs"
       ]
+    },
+    "docker-runner": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/maksim/git_projects/ai_challenges/day 1/mcp/docker-runner/index.mjs"
+      ],
+      "env": {
+        "PROJECT_DIR": "/Users/maksim/git_projects/ai_challenges/day 1"
+      }
     }
   }
 }

@@ -1,7 +1,6 @@
 .git-alt/
 .env
 gemini-client/.env
-gemini-client/hysteria/config.yaml
 __pycache__/
 *.pyc
 .DS_Store
@@ -9,4 +8,3 @@ venv/
 env/
 .venv/
 .memory-base/
-.claude

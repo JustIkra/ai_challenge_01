@@ -32,14 +32,6 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
-  # === Proxy ===
-  hysteria2:
-    image: tobyxdd/hysteria
-    command: ["client", "-c", "/etc/hysteria/config.yaml"]
-    volumes:
-      - ./hysteria/config.yaml:/etc/hysteria/config.yaml:ro
-    restart: unless-stopped
-
   # === Application ===
   backend:
     build: ./backend
@@ -75,15 +67,11 @@ services:
       # Queue Retry
       - QUEUE_RETRY_DELAYS=${QUEUE_RETRY_DELAYS:-60,600,3600,86400}
       - QUEUE_MAX_RETRIES=${QUEUE_MAX_RETRIES:-4}
-      # Proxy (via hysteria2 service)
-      - HTTP_PROXY=${HTTP_PROXY:-http://hysteria2:8080}
-      - HTTPS_PROXY=${HTTPS_PROXY:-http://hysteria2:8080}
       # Logging & Worker
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - WORKER_PREFETCH_COUNT=${WORKER_PREFETCH_COUNT:-10}
     depends_on:
       - rabbitmq
-      - hysteria2
     restart: unless-stopped
 
 volumes:

@@ -65,7 +65,6 @@ Configuration is done via the root `.env` file. See the [main README](../README.
 | `RABBITMQ_URL` | RabbitMQ connection string | - |
 | `OPENROUTER_API_KEYS` | OpenRouter API key | - |
 | `OPENROUTER_MODEL` | Model to use | `google/gemini-2.5-flash` |
-| `HTTP_PROXY` | Proxy URL | `http://hysteria2:8080` |
 | `KEYS_MAX_PER_MINUTE` | Rate limit per key | `10` |
 | `QUEUE_RETRY_DELAYS` | Retry delays (seconds) | `60,600,3600,86400` |
 

@@ -20,11 +20,10 @@ Nginx :80 ──┬──> Frontend (Vue.js :5173)
                     Gemini Client Worker
                             |
                             ├──> Multi-key rotation
-                            ├──> Rate limiting
-                            └──> Hysteria2 Proxy
+                            └──> Rate limiting
                                     |
                                     v
-                            Gemini API (Google)
+                            OpenRouter API
 ```
 
 ### Components
@@ -35,7 +34,6 @@ Nginx :80 ──┬──> Frontend (Vue.js :5173)
 - **Cache**: Redis 7
 - **Message Queue**: RabbitMQ 3
 - **Worker**: Gemini Client (Python)
-- **Proxy**: Hysteria2
 - **Reverse Proxy**: Nginx
 
 ## Quick Start
@@ -43,8 +41,7 @@ Nginx :80 ──┬──> Frontend (Vue.js :5173)
 ### Prerequisites
 
 - Docker & Docker Compose
-- Valid Gemini API keys (multiple recommended)
-- Hysteria2 proxy credentials (optional, for geo-restricted access)
+- OpenRouter API key (get from https://openrouter.ai/keys)
 
 ### Installation
 
@@ -67,8 +64,6 @@ OPENROUTER_API_KEYS=your_openrouter_api_key
 # Required: Set secure passwords
 DB_PASSWORD=your_secure_db_password
 RABBITMQ_PASSWORD=your_secure_rabbitmq_password
-
-# Optional: Configure Hysteria2 proxy in hysteria/config.yaml
 ```
 
 > **Note**: This project uses a single `.env` file and single `docker-compose.yml` for the entire stack.
@@ -146,12 +141,6 @@ docker-compose logs -f
 | `QUEUE_RETRY_DELAYS` | Escalating retry delays (seconds) | `60,600,3600,86400` |
 | `QUEUE_MAX_RETRIES` | Maximum retry attempts | `4` |
 
-### Proxy Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HTTP_PROXY` | Proxy URL for Gemini API calls | `http://hysteria2:8080` |
-
 ## Development
 
 ### Local Development (Without Docker)
@@ -221,8 +210,7 @@ npm run test:unit
 ### Production Checklist
 
 - [ ] Set secure passwords in `.env`
-- [ ] Configure valid Gemini API keys (minimum 3 recommended)
-- [ ] Update Hysteria2 proxy credentials in `hysteria/config.yaml`
+- [ ] Configure valid OpenRouter API key
 - [ ] Review rate limiting settings
 - [ ] Configure backup strategy for PostgreSQL volumes
 - [ ] Set up monitoring and alerting
@@ -343,7 +331,7 @@ docker-compose exec redis redis-cli KEYS '*'
 2. Verify RabbitMQ is running: `docker-compose ps rabbitmq`
 3. Check queue status: `docker-compose exec rabbitmq rabbitmqctl list_queues`
 4. Verify API keys are valid in `.env`
-5. Check proxy is working: `docker-compose logs hysteria2`
+5. Verify API keys are valid
 
 ### Database Connection Errors
 
@@ -367,19 +355,6 @@ docker-compose exec redis redis-cli KEYS '*'
 2. Increase `KEYS_COOLDOWN_SECONDS`
 3. Decrease `KEYS_MAX_PER_MINUTE`
 4. Monitor worker logs: `docker-compose logs -f gemini-client`
-
-### Hysteria2 Proxy Issues
-
-**Issue**: Worker can't reach Gemini API through proxy
-
-**Solutions**:
-1. Check Hysteria2 logs: `docker-compose logs hysteria2`
-2. Verify credentials in `hysteria/config.yaml`
-3. Test proxy manually:
-   ```bash
-   docker-compose exec gemini-client curl -x http://hysteria2:8080 https://generativelanguage.googleapis.com
-   ```
-4. Temporarily disable proxy by commenting out `HTTP_PROXY` in `.env`
 
 ## Data Persistence
 
@@ -434,8 +409,6 @@ day 1/
 │   └── Dockerfile
 ├── nginx/                  # Nginx configuration
 │   └── nginx.conf
-├── hysteria/               # Hysteria2 proxy config
-│   └── config.yaml
 ├── .memory-base/           # Development docs
 ├── docker-compose.yml      # Service orchestration
 ├── .env.example           # Environment template
