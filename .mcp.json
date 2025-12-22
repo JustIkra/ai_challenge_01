@@ -16,6 +16,18 @@
       "env": {
         "PROJECT_DIR": "/Users/maksim/git_projects/ai_challenges/day 1"
       }
+    },
+    "rag-server": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/maksim/git_projects/ai_challenges/day 1/mcp/rag-server/index.mjs"
+      ],
+      "env": {
+        "PROJECT_ROOT": "/Users/maksim/git_projects/ai_challenges/day 1",
+        "RAG_DATABASE_URL": "postgresql://chatapp:your_secure_password@localhost:5433/chatapp",
+        "EMBEDDING_MODEL": "Xenova/multilingual-e5-small"
+      }
     }
   }
 }

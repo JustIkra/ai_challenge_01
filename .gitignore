@@ -8,3 +8,6 @@ venv/
 env/
 .venv/
 .memory-base/
+node_modules/
+mcp/*/node_modules/
+mcp/*/.cache/
