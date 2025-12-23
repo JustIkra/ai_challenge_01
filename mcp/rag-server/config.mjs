@@ -11,11 +11,11 @@ dotenvConfig({ path: resolve(projectRoot, '.env') });
 export const CONFIG = {
   code: {
     patterns: ['**/*.py', '**/*.js', '**/*.ts', '**/*.vue'],
-    ignore: ['node_modules/**', '__pycache__/**', 'dist/**', '.git/**', 'mcp/**/node_modules/**']
+    ignore: ['**/node_modules/**', '**/__pycache__/**', '**/dist/**', '**/.git/**', '**/venv/**', '**/.venv/**']
   },
   docs: {
     patterns: ['**/*.md', '.memory-base/**/*'],
-    ignore: ['node_modules/**']
+    ignore: ['**/node_modules/**']
   },
   embeddings: {
     // Local model via @xenova/transformers (runs on CPU/Metal)
