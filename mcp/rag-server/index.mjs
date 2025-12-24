@@ -221,16 +221,17 @@ server.registerTool(
     description: "Semantic search across indexed project files. Returns most relevant files for the query.",
     inputSchema: {
       query: z.string().describe("Search query"),
-      limit: z.number().optional().describe("Maximum number of results (default: 5)")
+      limit: z.number().optional().describe("Maximum number of results (default: 5)"),
+      format: z.enum(['text', 'json']).optional().describe("Output format: 'text' (default, human-readable) or 'json' (structured data)")
     }
   },
-  async ({ query, limit = 5 }) => {
+  async ({ query, limit = 5, format = 'text' }) => {
     try {
       if (!query || query.trim().length === 0) {
         return formatResult({ success: false, error: "Query cannot be empty" });
       }
 
-      console.error(`[rag_search] Searching for: "${query}" (limit=${limit})`);
+      console.error(`[rag_search] Searching for: "${query}" (limit=${limit}, format=${format})`);
 
       await initDb();
 
@@ -244,7 +245,25 @@ server.registerTool(
         return formatResult({ success: true, output: "No results found. Try running rag_index first." });
       }
 
-      // Format results
+      // Return JSON format if requested
+      if (format === 'json') {
+        const jsonResults = results.map((r, i) => ({
+          rank: i + 1,
+          file_path: r.file_path,
+          file_type: r.file_type,
+          language: r.language || r.file_type,
+          similarity: r.similarity,
+          lines_count: r.lines_count,
+          content: r.content
+        }));
+
+        return formatResult({
+          success: true,
+          output: JSON.stringify({ results: jsonResults, count: results.length }, null, 2)
+        });
+      }
+
+      // Format results as text (existing behavior)
       const output = results.map((r, i) => {
         const similarity = (r.similarity * 100).toFixed(1);
         const preview = r.content.slice(0, 200).replace(/\n/g, ' ').trim();
