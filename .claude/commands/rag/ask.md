@@ -7,7 +7,7 @@ Answer the question about this project using RAG semantic search with relevance 
 
 ## Parameters
 - `$1` - Question about the project (required)
-- `$2` - Number of chunks to retrieve (default: 5)
+- `$2` - Number of chunks to show in "unfiltered" block (default: 5)
 - `$3` - Similarity threshold 0.0-1.0 (default: 0.70, means 70%)
 
 ## Instructions
@@ -15,19 +15,20 @@ Answer the question about this project using RAG semantic search with relevance 
 ### Step 1: Check Index Status
 Use MCP tool `rag_status` to check if index exists. If total documents = 0, inform user to run `/rag:index` first and stop.
 
-### Step 2: RAG Search (retrieve top-k candidates)
+### Step 2: RAG Search (retrieve top-50 candidates)
 Use MCP tool `rag_search` with:
 - query: `$1`
-- limit: `$2` (or 5 if not specified)
+- limit: 50 (always fetch 50 candidates to ensure we don't miss relevant files)
 - format: `json`
 
 Parse the JSON response to get array of results with similarity scores.
 
 ### Step 3: Apply Relevance Filter
+- Parse `$2` as k (default: 5) - number of results to show in unfiltered block
 - Parse `$3` as threshold (default: 0.70)
 - Create two result sets:
-  1. **Unfiltered**: All top-k results from Step 2
-  2. **Filtered**: Only results where `similarity >= threshold`
+  1. **Unfiltered**: First k results from all 50 candidates (top-k by similarity)
+  2. **Filtered**: All results from 50 candidates where `similarity >= threshold`
 
 ### Step 4: Generate Two Answers
 Generate answers for BOTH result sets:
@@ -56,7 +57,7 @@ Present results in three blocks:
 
 ## 2️⃣ RAG с фильтром релевантности (>= {threshold*100}%)
 
-### Источники ({filtered_count} из {k} файлов):
+### Источники ({filtered_count} из 50 кандидатов):
 {list filtered sources with similarity percentage}
 - [{similarity}%] {file_path} ({language})
 
@@ -70,9 +71,9 @@ Present results in three blocks:
 ## 3️⃣ Сравнение качества
 
 **Количество источников:**
-- Без фильтра: {k} файлов
-- С фильтром: {filtered_count} файлов
-- Отфильтровано: {k - filtered_count} файлов
+- Без фильтра: {k} файлов (топ-k из 50 кандидатов)
+- С фильтром: {filtered_count} файлов (из 50 кандидатов с similarity >= {threshold})
+- Отфильтровано из пула: {50 - filtered_count} файлов
 
 **Оценка качества:**
 {2-4 sentences comparing the answers:
