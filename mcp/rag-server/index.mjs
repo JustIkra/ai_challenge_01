@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { initDb, upsertDocument, getDocumentByPath, searchSimilar, getStats, clearAll, getAllPaths, deleteByPaths, closeDb } from "./lib/db.mjs";
+import { initDb, upsertDocument, getDocumentByPath, searchSimilar, getStats, clearAll, getAllPaths, deleteByPaths, closeDb, getChatHistory, appendChatMessage, resetChatHistory, getChatSessionStats } from "./lib/db.mjs";
 import { loadAllFiles, loadSingleFile } from "./lib/loader.mjs";
 import { generateEmbeddingsBatched, generateQueryEmbedding } from "./lib/embeddings.mjs";
 
@@ -373,6 +373,136 @@ server.registerTool(
       });
 
     } catch (error) {
+      return formatResult({ success: false, error: error.message });
+    }
+  }
+);
+
+// ============================================
+// RAG Chat Tools
+// ============================================
+
+// Tool: rag_chat_history
+server.registerTool(
+  "rag_chat_history",
+  {
+    description: "Get chat history for a session. Returns last N messages in chronological order.",
+    inputSchema: {
+      session_id: z.string().optional().describe("Session identifier (default: 'default')"),
+      limit: z.number().optional().describe("Maximum number of messages to return (default: 10)")
+    }
+  },
+  async ({ session_id = 'default', limit = 10 }) => {
+    try {
+      console.error(`[rag_chat_history] Getting history for session: ${session_id} (limit=${limit})`);
+      
+      await initDb();
+      
+      const messages = await getChatHistory(session_id, limit);
+      const stats = await getChatSessionStats(session_id);
+      
+      if (messages.length === 0) {
+        return formatResult({
+          success: true,
+          output: JSON.stringify({
+            session_id,
+            messages: [],
+            total_in_session: 0
+          }, null, 2)
+        });
+      }
+      
+      const formattedMessages = messages.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        sources: m.sources,
+        created_at: m.created_at
+      }));
+      
+      return formatResult({
+        success: true,
+        output: JSON.stringify({
+          session_id,
+          messages: formattedMessages,
+          total_in_session: stats.message_count,
+          first_message: stats.first_message,
+          last_message: stats.last_message
+        }, null, 2)
+      });
+      
+    } catch (error) {
+      console.error(`[rag_chat_history] Error: ${error.message}`);
+      return formatResult({ success: false, error: error.message });
+    }
+  }
+);
+
+// Tool: rag_chat_append
+server.registerTool(
+  "rag_chat_append",
+  {
+    description: "Append a message to chat history. Used to save user questions and assistant responses.",
+    inputSchema: {
+      session_id: z.string().optional().describe("Session identifier (default: 'default')"),
+      role: z.enum(['user', 'assistant']).describe("Message role: 'user' or 'assistant'"),
+      content: z.string().describe("Message content"),
+      sources: z.array(z.object({
+        file_path: z.string(),
+        similarity: z.number()
+      })).optional().describe("Sources for assistant messages (array of {file_path, similarity})")
+    }
+  },
+  async ({ session_id = 'default', role, content, sources = null }) => {
+    try {
+      console.error(`[rag_chat_append] Appending ${role} message to session: ${session_id}`);
+      
+      await initDb();
+      
+      const result = await appendChatMessage(session_id, role, content, sources);
+      
+      return formatResult({
+        success: true,
+        output: JSON.stringify({
+          id: result.id,
+          session_id,
+          role,
+          created_at: result.created_at,
+          sources_count: sources ? sources.length : 0
+        }, null, 2)
+      });
+      
+    } catch (error) {
+      console.error(`[rag_chat_append] Error: ${error.message}`);
+      return formatResult({ success: false, error: error.message });
+    }
+  }
+);
+
+// Tool: rag_chat_reset
+server.registerTool(
+  "rag_chat_reset",
+  {
+    description: "Reset (delete) chat history for a session. Use to start a fresh conversation.",
+    inputSchema: {
+      session_id: z.string().optional().describe("Session identifier (default: 'default')")
+    }
+  },
+  async ({ session_id = 'default' }) => {
+    try {
+      console.error(`[rag_chat_reset] Resetting session: ${session_id}`);
+      
+      await initDb();
+      
+      const deletedCount = await resetChatHistory(session_id);
+      
+      return formatResult({
+        success: true,
+        output: `Session "${session_id}" reset. Deleted ${deletedCount} messages.`
+      });
+      
+    } catch (error) {
+      console.error(`[rag_chat_reset] Error: ${error.message}`);
       return formatResult({ success: false, error: error.message });
     }
   }

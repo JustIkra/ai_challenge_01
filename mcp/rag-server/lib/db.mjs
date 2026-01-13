@@ -204,3 +204,92 @@ export async function closeDb() {
     console.error('[db] Connection pool closed');
   }
 }
+
+// ============================================
+// RAG Chat History Functions
+// ============================================
+
+/**
+ * Get chat history for a session
+ * @param {string} sessionId - Session identifier
+ * @param {number} limit - Maximum number of messages to return
+ * @returns {Promise<Array<{id: number, role: string, content: string, sources: object|null, created_at: Date}>>}
+ */
+export async function getChatHistory(sessionId, limit = 10) {
+  const db = getPool();
+  
+  const result = await db.query(
+    `SELECT id, role, content, sources, created_at 
+     FROM rag_chat_messages 
+     WHERE session_id = $1 
+     ORDER BY created_at DESC 
+     LIMIT $2`,
+    [sessionId, limit]
+  );
+  
+  // Return in chronological order (oldest first)
+  return result.rows.reverse();
+}
+
+/**
+ * Append a message to chat history
+ * @param {string} sessionId - Session identifier
+ * @param {string} role - 'user' or 'assistant'
+ * @param {string} content - Message content
+ * @param {Array<{file_path: string, similarity: number}>|null} sources - Sources for assistant messages
+ * @returns {Promise<{id: number, created_at: Date}>}
+ */
+export async function appendChatMessage(sessionId, role, content, sources = null) {
+  const db = getPool();
+  
+  const result = await db.query(
+    `INSERT INTO rag_chat_messages (session_id, role, content, sources)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, created_at`,
+    [sessionId, role, content, sources ? JSON.stringify(sources) : null]
+  );
+  
+  return result.rows[0];
+}
+
+/**
+ * Reset (delete) chat history for a session
+ * @param {string} sessionId - Session identifier
+ * @returns {Promise<number>} Number of deleted messages
+ */
+export async function resetChatHistory(sessionId) {
+  const db = getPool();
+  
+  const result = await db.query(
+    'DELETE FROM rag_chat_messages WHERE session_id = $1',
+    [sessionId]
+  );
+  
+  return result.rowCount;
+}
+
+/**
+ * Get chat session statistics
+ * @param {string} sessionId - Session identifier
+ * @returns {Promise<{message_count: number, first_message: Date|null, last_message: Date|null}>}
+ */
+export async function getChatSessionStats(sessionId) {
+  const db = getPool();
+  
+  const result = await db.query(
+    `SELECT 
+       COUNT(*) as message_count,
+       MIN(created_at) as first_message,
+       MAX(created_at) as last_message
+     FROM rag_chat_messages 
+     WHERE session_id = $1`,
+    [sessionId]
+  );
+  
+  const row = result.rows[0];
+  return {
+    message_count: parseInt(row.message_count, 10),
+    first_message: row.first_message,
+    last_message: row.last_message
+  };
+}
