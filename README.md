@@ -462,6 +462,31 @@ GET /api/chats/{chat_id}/messages
 
 For complete API documentation, visit http://localhost/api/docs when the services are running.
 
+## Claude Code Commands
+
+This project includes slash commands for Claude Code integration.
+
+### `/pr:review` - PR Review with RAG Context
+
+Reviews a pull request using GitHub MCP and RAG-enhanced project context.
+
+```
+/pr:review [base_branch] [head_branch]
+```
+
+**Example:**
+```
+/pr:review main day-19
+```
+
+**Prerequisites:**
+- PR must exist on GitHub (`gh pr create --base main --head <branch>`)
+- RAG index should be built (`/rag:index`)
+
+**Output:** Structured review with summary, major/minor issues, questions, and test plan.
+
+See [design document](docs/plans/2026-01-13-pr-review-design.md) for details.
+
 ## Contributing
 
 1. Create feature branch from `main`
