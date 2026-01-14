@@ -77,6 +77,40 @@ services:
       - rabbitmq
     restart: unless-stopped
 
+  # === RAG & Support ===
+  rag-server:
+    build:
+      context: ./mcp/rag-server
+      dockerfile: Dockerfile
+    ports:
+      - "${RAG_HTTP_PORT:-8801}:8801"
+    environment:
+      - RAG_DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/chatapp
+      - RAG_HTTP_PORT=8801
+      - PROJECT_ROOT=/app/project
+    volumes:
+      - .:/app/project:ro
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  support-bot:
+    build:
+      context: ./support-bot
+      dockerfile: Dockerfile
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENROUTER_API_KEYS=${OPENROUTER_API_KEYS}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-3-haiku}
+      - RAG_SERVER_URL=http://rag-server:8801
+      - RAG_TOP_K=${RAG_TOP_K:-5}
+      - MAX_INPUT_LENGTH=${MAX_INPUT_LENGTH:-1000}
+      - MAX_OUTPUT_LENGTH=${MAX_OUTPUT_LENGTH:-4000}
+    depends_on:
+      - rag-server
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

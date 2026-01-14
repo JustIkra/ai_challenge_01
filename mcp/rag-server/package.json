@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "main": "index.mjs",
+  "scripts": {
+    "start:http": "node http-server.mjs"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@xenova/transformers": "^2.17.2",
