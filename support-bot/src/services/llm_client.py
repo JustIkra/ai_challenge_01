@@ -101,3 +101,72 @@ class LLMClient:
         except Exception as e:
             logger.error("Unexpected LLM error: %s", e)
             return None
+
+    async def chat_completion_with_tools(
+        self,
+        messages: list,
+        tools: list,
+        max_tokens: int = 2000,
+    ) -> dict | None:
+        """Send chat completion request with function calling tools.
+
+        Args:
+            messages: List of message dicts (role, content, etc.)
+            tools: List of tool definitions in OpenAI format
+            max_tokens: Maximum response tokens
+
+        Returns:
+            Dict with 'content' and optionally 'tool_calls', or None on error
+        """
+        url = f"{self.base_url}/chat/completions"
+        api_key = self._get_next_key()
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/day1-app/support-bot",
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.7,
+        }
+
+        if tools:
+            payload["tools"] = tools
+
+        try:
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                async with session.post(url, json=payload, headers=headers) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(
+                            "LLM request failed: status=%d, body=%s",
+                            response.status,
+                            error_text,
+                        )
+                        return None
+
+                    data = await response.json()
+                    choices = data.get("choices", [])
+                    if not choices:
+                        logger.error("LLM response has no choices")
+                        return None
+
+                    message = choices[0].get("message", {})
+                    result = {"content": message.get("content")}
+
+                    # Extract tool calls if present
+                    if "tool_calls" in message:
+                        result["tool_calls"] = message["tool_calls"]
+
+                    return result
+
+        except aiohttp.ClientError as e:
+            logger.error("LLM client error: %s", e)
+            return None
+        except Exception as e:
+            logger.error("Unexpected LLM error: %s", e)
+            return None

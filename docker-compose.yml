@@ -78,6 +78,19 @@ services:
     restart: unless-stopped
 
   # === RAG & Support ===
+  reminder-server:
+    build:
+      context: ./mcp/reminder
+      dockerfile: Dockerfile
+    ports:
+      - "${REMINDER_HTTP_PORT:-8802}:8802"
+    environment:
+      - REMINDER_HTTP_PORT=8802
+      - REMINDERS_FILE=/app/data/reminders.json
+    volumes:
+      - reminder-data:/app/data
+    restart: unless-stopped
+
   rag-server:
     build:
       context: ./mcp/rag-server
@@ -104,17 +117,20 @@ services:
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-3-haiku}
       - RAG_SERVER_URL=http://rag-server:8801
+      - REMINDER_SERVER_URL=http://reminder-server:8802
       - RAG_TOP_K=${RAG_TOP_K:-5}
       - MAX_INPUT_LENGTH=${MAX_INPUT_LENGTH:-1000}
       - MAX_OUTPUT_LENGTH=${MAX_OUTPUT_LENGTH:-4000}
     depends_on:
       - rag-server
+      - reminder-server
     restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  reminder-data:
 
 networks:
   default:

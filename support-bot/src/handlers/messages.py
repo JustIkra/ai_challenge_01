@@ -1,15 +1,19 @@
-"""Text message handler with RAG + LLM processing."""
+"""Text message handler with ReAct agent for tool-based processing."""
 
 import logging
-from typing import List
+from dataclasses import asdict
 
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.enums import ChatType, ChatAction
 
 from src.config import get_config
-from src.services.rag_client import RAGClient, RAGResult
+from src.services.rag_client import RAGClient
 from src.services.llm_client import LLMClient
+from src.clients.reminder import ReminderClient
+from src.clients.docker import DockerClient
+from src.agent.executor import ReActAgent
+from src.agent.tools import ToolName, ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -17,6 +21,8 @@ router = Router()
 # Initialize clients lazily
 _rag_client: RAGClient = None
 _llm_client: LLMClient = None
+_reminder_client: ReminderClient = None
+_docker_client: DockerClient = None
 
 
 def get_rag_client() -> RAGClient:
@@ -41,65 +47,165 @@ def get_llm_client() -> LLMClient:
     return _llm_client
 
 
-def build_llm_prompt(question: str, rag_results: List[RAGResult]) -> str:
-    """Build user prompt with RAG context.
+def get_reminder_client() -> ReminderClient:
+    """Get or create Reminder client."""
+    global _reminder_client
+    if _reminder_client is None:
+        config = get_config()
+        _reminder_client = ReminderClient(config.reminder_server_url)
+    return _reminder_client
+
+
+def get_docker_client() -> DockerClient:
+    """Get or create Docker client."""
+    global _docker_client
+    if _docker_client is None:
+        _docker_client = DockerClient()
+    return _docker_client
+
+
+async def tool_executor(tool_call: ToolCall) -> ToolResult:
+    """Execute a tool call and return the result.
 
     Args:
-        question: User's question
-        rag_results: List of RAG search results
+        tool_call: The tool call to execute
 
     Returns:
-        Formatted prompt for LLM
+        ToolResult with success status and result/error
     """
-    context_parts = []
+    tool_name = tool_call.name
+    args = tool_call.arguments
 
-    if rag_results:
-        context_parts.append("Контекст из документации:\n")
-        for i, result in enumerate(rag_results, 1):
-            context_parts.append(f"--- Источник {i}: {result.file_name} ---")
-            # Truncate long content
-            content = result.content
-            if len(content) > 1500:
-                content = content[:1500] + "..."
-            context_parts.append(content)
-            context_parts.append("")
+    try:
+        if tool_name == ToolName.RAG_SEARCH:
+            rag_client = get_rag_client()
+            query = args.get("query", "")
+            config = get_config()
+            response = await rag_client.search(query, limit=config.rag_top_k)
 
-    context_parts.append(f"Вопрос пользователя: {question}")
+            if response is None:
+                return ToolResult(
+                    tool=tool_name.value,
+                    success=False,
+                    error="RAG search failed",
+                )
 
-    return "\n".join(context_parts)
+            # Format results for LLM
+            results_data = []
+            for r in response.results:
+                results_data.append({
+                    "file_name": r.file_name,
+                    "file_path": r.file_path,
+                    "content": r.content[:1500] if len(r.content) > 1500 else r.content,
+                    "similarity": r.similarity,
+                })
 
+            return ToolResult(
+                tool=tool_name.value,
+                success=True,
+                result={"count": response.count, "results": results_data},
+            )
 
-def format_response(llm_response: str, sources: List[str], max_length: int) -> str:
-    """Format LLM response with sources.
+        elif tool_name == ToolName.REMINDER_ADD:
+            reminder_client = get_reminder_client()
+            text = args.get("text", "")
+            due_date = args.get("due_date")
+            result = await reminder_client.add(text, due_date)
 
-    Args:
-        llm_response: Raw LLM response
-        sources: List of source file names
-        max_length: Maximum response length
+            if result is None:
+                return ToolResult(
+                    tool=tool_name.value,
+                    success=False,
+                    error="Failed to add reminder",
+                )
 
-    Returns:
-        Formatted response string
-    """
-    parts = [llm_response]
+            return ToolResult(
+                tool=tool_name.value,
+                success=True,
+                result=result,
+            )
 
-    # Add sources section if we have any
-    if sources:
-        unique_sources = list(dict.fromkeys(sources))  # Preserve order, remove duplicates
-        sources_text = "\n\nИсточники:\n" + "\n".join(f"- {s}" for s in unique_sources[:5])
-        parts.append(sources_text)
+        elif tool_name == ToolName.REMINDER_LIST:
+            reminder_client = get_reminder_client()
+            show_completed = args.get("show_completed", False)
+            reminders = await reminder_client.list(show_completed)
 
-    result = "".join(parts)
+            return ToolResult(
+                tool=tool_name.value,
+                success=True,
+                result={
+                    "reminders": [asdict(r) for r in reminders],
+                    "count": len(reminders),
+                },
+            )
 
-    # Truncate if too long
-    if len(result) > max_length:
-        result = result[: max_length - 3] + "..."
+        elif tool_name == ToolName.REMINDER_COMPLETE:
+            reminder_client = get_reminder_client()
+            reminder_id = args.get("id", "")
+            success = await reminder_client.complete(reminder_id)
 
-    return result
+            if not success:
+                return ToolResult(
+                    tool=tool_name.value,
+                    success=False,
+                    error=f"Failed to complete reminder {reminder_id}",
+                )
+
+            return ToolResult(
+                tool=tool_name.value,
+                success=True,
+                result={"completed_id": reminder_id},
+            )
+
+        elif tool_name == ToolName.REMINDER_SUMMARY:
+            reminder_client = get_reminder_client()
+            summary = await reminder_client.summary()
+
+            if summary is None:
+                return ToolResult(
+                    tool=tool_name.value,
+                    success=False,
+                    error="Failed to get reminder summary",
+                )
+
+            return ToolResult(
+                tool=tool_name.value,
+                success=True,
+                result=asdict(summary),
+            )
+
+        elif tool_name == ToolName.DOCKER_STATUS:
+            docker_client = get_docker_client()
+            containers = await docker_client.get_status()
+
+            return ToolResult(
+                tool=tool_name.value,
+                success=True,
+                result={
+                    "containers": [asdict(c) for c in containers],
+                    "count": len(containers),
+                },
+            )
+
+        else:
+            return ToolResult(
+                tool=tool_name.value if hasattr(tool_name, "value") else str(tool_name),
+                success=False,
+                error=f"Unknown tool: {tool_name}",
+            )
+
+    except Exception as e:
+        logger.error("Tool execution error for %s: %s", tool_name, e, exc_info=True)
+        return ToolResult(
+            tool=tool_name.value if hasattr(tool_name, "value") else str(tool_name),
+            success=False,
+            error=str(e),
+        )
 
 
 @router.message(F.text)
 async def handle_text_message(message: Message) -> None:
-    """Handle incoming text messages."""
+    """Handle incoming text messages using ReAct agent."""
     # Only process private messages
     if message.chat.type != ChatType.PRIVATE:
         return
@@ -111,36 +217,31 @@ async def handle_text_message(message: Message) -> None:
     config = get_config()
 
     # Truncate long messages
-    question = message.text.strip()
-    if len(question) > config.max_input_length:
-        question = question[: config.max_input_length]
+    user_message = message.text.strip()
+    if len(user_message) > config.max_input_length:
+        user_message = user_message[: config.max_input_length]
 
     # Send typing indicator
     await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
 
     try:
-        # Search RAG
-        rag_client = get_rag_client()
-        rag_response = await rag_client.search(question, limit=config.rag_top_k)
-
-        rag_results = rag_response.results if rag_response else []
-        sources = [r.file_name for r in rag_results]
-
-        # Build prompt with context
-        system_prompt = config.get_system_prompt()
-        user_prompt = build_llm_prompt(question, rag_results)
-
-        # Call LLM
+        # Create ReAct agent
         llm_client = get_llm_client()
-        llm_response = await llm_client.chat_completion(system_prompt, user_prompt)
+        agent = ReActAgent(
+            llm_client=llm_client,
+            tool_executor=tool_executor,
+            timeout=45.0,
+            max_iterations=5,
+        )
 
-        if llm_response is None:
-            await message.answer("Произошла ошибка, попробуйте позже")
-            return
+        # Run agent
+        response = await agent.run(user_message)
 
-        # Format and send response
-        formatted = format_response(llm_response, sources, config.max_output_length)
-        await message.answer(formatted)
+        # Truncate if too long
+        if len(response) > config.max_output_length:
+            response = response[: config.max_output_length - 3] + "..."
+
+        await message.answer(response)
 
     except Exception as e:
         logger.error("Error processing message: %s", e, exc_info=True)

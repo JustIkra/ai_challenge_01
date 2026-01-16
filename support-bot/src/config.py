@@ -21,6 +21,9 @@ class Config:
     rag_server_url: str
     rag_top_k: int
 
+    # Reminder MCP Server
+    reminder_server_url: str
+
     # OpenRouter
     openrouter_api_keys: List[str]
     openrouter_base_url: str
@@ -29,6 +32,9 @@ class Config:
     # Limits
     max_input_length: int
     max_output_length: int
+
+    # Timeouts
+    agent_timeout: float
 
     # Paths
     system_prompt_path: Path
@@ -49,6 +55,7 @@ class Config:
             telegram_bot_token=telegram_token,
             rag_server_url=os.getenv("RAG_SERVER_URL", "http://rag-server:8801"),
             rag_top_k=int(os.getenv("RAG_TOP_K", "5")),
+            reminder_server_url=os.getenv("REMINDER_SERVER_URL", ""),
             openrouter_api_keys=openrouter_keys,
             openrouter_base_url=os.getenv(
                 "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
@@ -58,6 +65,7 @@ class Config:
             ),
             max_input_length=int(os.getenv("MAX_INPUT_LENGTH", "1000")),
             max_output_length=int(os.getenv("MAX_OUTPUT_LENGTH", "4000")),
+            agent_timeout=float(os.getenv("AGENT_TIMEOUT", "30.0")),
             system_prompt_path=Path(__file__).parent / "prompts" / "system.txt",
         )
 

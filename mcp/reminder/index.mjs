@@ -3,26 +3,29 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { randomUUID } from "crypto";
 
-const REMINDERS_FILE = "reminders.json";
+// HTTP API base URL - use Docker reminder-server
+const REMINDER_API_URL = process.env.REMINDER_API_URL || "http://localhost:8802";
 
-// Helper functions
-function loadReminders() {
-  if (!existsSync(REMINDERS_FILE)) {
-    return { reminders: [] };
+// Helper functions for HTTP requests
+async function apiGet(endpoint) {
+  const response = await fetch(`${REMINDER_API_URL}${endpoint}`);
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status}`);
   }
-  try {
-    const data = readFileSync(REMINDERS_FILE, "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return { reminders: [] };
-  }
+  return response.json();
 }
 
-function saveReminders(data) {
-  writeFileSync(REMINDERS_FILE, JSON.stringify(data, null, 2), "utf-8");
+async function apiPost(endpoint, data) {
+  const response = await fetch(`${REMINDER_API_URL}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status}`);
+  }
+  return response.json();
 }
 
 function formatDate(dateStr) {
@@ -34,15 +37,10 @@ function formatDate(dateStr) {
   });
 }
 
-function isOverdue(dueDate) {
-  if (!dueDate) return false;
-  return new Date(dueDate) < new Date();
-}
-
 // Server setup
 const server = new McpServer({
   name: "reminder-mcp",
-  version: "0.1.0"
+  version: "0.2.0"
 });
 
 // Tool: add_reminder
@@ -56,28 +54,21 @@ server.registerTool(
     }
   },
   async ({ text, due_date }) => {
-    const data = loadReminders();
-
-    const reminder = {
-      id: randomUUID().slice(0, 8),
-      text,
-      created_at: new Date().toISOString(),
-      due_date: due_date || null,
-      completed: false,
-      completed_at: null
-    };
-
-    data.reminders.push(reminder);
-    saveReminders(data);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Задача добавлена:\n- ID: ${reminder.id}\n- Текст: ${reminder.text}${due_date ? `\n- Дедлайн: ${formatDate(due_date)}` : ""}`
-        }
-      ]
-    };
+    try {
+      const result = await apiPost("/api/add", { text, due_date });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Задача добавлена:\n- ID: ${result.id}\n- Текст: ${result.text}${due_date ? `\n- Дедлайн: ${formatDate(due_date)}` : ""}`
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Ошибка: ${error.message}` }]
+      };
+    }
   }
 );
 
@@ -91,29 +82,32 @@ server.registerTool(
     }
   },
   async ({ show_completed = false }) => {
-    const data = loadReminders();
+    try {
+      const url = show_completed ? "/api/list?show_completed=true" : "/api/list";
+      const data = await apiGet(url);
+      const reminders = data.reminders || [];
 
-    let reminders = data.reminders;
-    if (!show_completed) {
-      reminders = reminders.filter(r => !r.completed);
-    }
+      if (reminders.length === 0) {
+        return {
+          content: [{ type: "text", text: "Нет задач." }]
+        };
+      }
 
-    if (reminders.length === 0) {
+      const lines = reminders.map(r => {
+        const status = r.completed ? "[x]" : "[ ]";
+        const overdue = r.is_overdue ? " (ПРОСРОЧЕНО)" : "";
+        const due = r.due_date ? ` | до ${formatDate(r.due_date)}${overdue}` : "";
+        return `${status} ${r.id}: ${r.text}${due}`;
+      });
+
       return {
-        content: [{ type: "text", text: "Нет задач." }]
+        content: [{ type: "text", text: lines.join("\n") }]
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Ошибка: ${error.message}` }]
       };
     }
-
-    const lines = reminders.map(r => {
-      const status = r.completed ? "[x]" : "[ ]";
-      const overdue = !r.completed && isOverdue(r.due_date) ? " (ПРОСРОЧЕНО)" : "";
-      const due = r.due_date ? ` | до ${formatDate(r.due_date)}${overdue}` : "";
-      return `${status} ${r.id}: ${r.text}${due}`;
-    });
-
-    return {
-      content: [{ type: "text", text: lines.join("\n") }]
-    };
   }
 );
 
@@ -127,28 +121,21 @@ server.registerTool(
     }
   },
   async ({ id }) => {
-    const data = loadReminders();
-    const reminder = data.reminders.find(r => r.id === id);
-
-    if (!reminder) {
+    try {
+      const result = await apiPost("/api/complete", { id });
+      if (result.already_completed) {
+        return {
+          content: [{ type: "text", text: `Задача уже была выполнена.` }]
+        };
+      }
       return {
-        content: [{ type: "text", text: `Задача с ID "${id}" не найдена.` }]
+        content: [{ type: "text", text: `Задача выполнена!` }]
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Ошибка: ${error.message}` }]
       };
     }
-
-    if (reminder.completed) {
-      return {
-        content: [{ type: "text", text: `Задача "${reminder.text}" уже выполнена.` }]
-      };
-    }
-
-    reminder.completed = true;
-    reminder.completed_at = new Date().toISOString();
-    saveReminders(data);
-
-    return {
-      content: [{ type: "text", text: `Задача выполнена: ${reminder.text}` }]
-    };
   }
 );
 
@@ -162,21 +149,16 @@ server.registerTool(
     }
   },
   async ({ id }) => {
-    const data = loadReminders();
-    const index = data.reminders.findIndex(r => r.id === id);
-
-    if (index === -1) {
+    try {
+      await apiPost("/api/delete", { id });
       return {
-        content: [{ type: "text", text: `Задача с ID "${id}" не найдена.` }]
+        content: [{ type: "text", text: `Задача удалена.` }]
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Ошибка: ${error.message}` }]
       };
     }
-
-    const removed = data.reminders.splice(index, 1)[0];
-    saveReminders(data);
-
-    return {
-      content: [{ type: "text", text: `Задача удалена: ${removed.text}` }]
-    };
   }
 );
 
@@ -187,50 +169,45 @@ server.registerTool(
     description: "Получить краткую сводку по задачам: активные, просроченные, выполненные сегодня."
   },
   async () => {
-    const data = loadReminders();
-    const reminders = data.reminders;
+    try {
+      const summary = await apiGet("/api/summary");
+      const list = await apiGet("/api/list");
+      const reminders = list.reminders || [];
 
-    if (reminders.length === 0) {
+      const lines = [
+        `Задачи проекта:`,
+        `- Активных: ${summary.active}`,
+        `- Просроченных: ${summary.overdue}`,
+        `- Выполнено сегодня: ${summary.completed_today}`
+      ];
+
+      const overdue = reminders.filter(r => r.is_overdue);
+      if (overdue.length > 0) {
+        lines.push("");
+        lines.push("Просроченные:");
+        overdue.forEach(r => {
+          lines.push(`  - ${r.id}: ${r.text} (до ${formatDate(r.due_date)})`);
+        });
+      }
+
+      const active = reminders.filter(r => !r.completed);
+      if (active.length > 0 && active.length <= 5) {
+        lines.push("");
+        lines.push("Активные задачи:");
+        active.forEach(r => {
+          const due = r.due_date ? ` (до ${formatDate(r.due_date)})` : "";
+          lines.push(`  - ${r.id}: ${r.text}${due}`);
+        });
+      }
+
       return {
-        content: [{ type: "text", text: "Нет задач в этом проекте." }]
+        content: [{ type: "text", text: lines.join("\n") }]
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Ошибка подключения к reminder-server: ${error.message}` }]
       };
     }
-
-    const active = reminders.filter(r => !r.completed);
-    const overdue = active.filter(r => isOverdue(r.due_date));
-
-    const today = new Date().toDateString();
-    const completedToday = reminders.filter(r =>
-      r.completed && r.completed_at && new Date(r.completed_at).toDateString() === today
-    );
-
-    const lines = [
-      `Задачи проекта:`,
-      `- Активных: ${active.length}`,
-      `- Просроченных: ${overdue.length}`,
-      `- Выполнено сегодня: ${completedToday.length}`
-    ];
-
-    if (overdue.length > 0) {
-      lines.push("");
-      lines.push("Просроченные:");
-      overdue.forEach(r => {
-        lines.push(`  - ${r.id}: ${r.text} (до ${formatDate(r.due_date)})`);
-      });
-    }
-
-    if (active.length > 0 && active.length <= 5) {
-      lines.push("");
-      lines.push("Активные задачи:");
-      active.forEach(r => {
-        const due = r.due_date ? ` (до ${formatDate(r.due_date)})` : "";
-        lines.push(`  - ${r.id}: ${r.text}${due}`);
-      });
-    }
-
-    return {
-      content: [{ type: "text", text: lines.join("\n") }]
-    };
   }
 );
 
